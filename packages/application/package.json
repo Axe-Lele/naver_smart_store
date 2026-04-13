@@ -1,0 +1,6 @@
+{
+  "name": "@smart-store/application",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts"
+}

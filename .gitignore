@@ -1,0 +1,12 @@
+node_modules
+output
+.desktop-app
+dist
+.playwright-browsers
+release
+.auth
+.env
+secrets
+coverage
+*.log
+smoke-install

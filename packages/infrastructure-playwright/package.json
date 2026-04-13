@@ -1,0 +1,6 @@
+{
+  "name": "@smart-store/infrastructure-playwright",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module"
+}
