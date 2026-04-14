@@ -1,0 +1,51 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/pre-bash-safety.cjs",
+            "statusMessage": "Checking shell safety and verification hints",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/pre-read-sensitive.cjs",
+            "statusMessage": "Checking sensitive file access",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/pre-edit-config-guard.cjs",
+            "statusMessage": "Checking config, selector, and secret safety",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/stop-smart-store-review.cjs",
+            "statusMessage": "Reviewing changed files for smart-store risk",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

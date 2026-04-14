@@ -11,6 +11,7 @@ import type {
 import type { BootState, RunDetail } from '@smart-store/shared';
 
 import {
+  BrandLogo,
   DetailPair,
   EmptyState,
   ProductTable,
@@ -31,13 +32,13 @@ import {
 } from './helpers.js';
 
 const NAV_ITEMS: Array<{ id: ViewId; label: string; description: string }> = [
-  { id: 'dashboard', label: '대시보드', description: '현재 세션, 최근 실행, 빠른 요약' },
-  { id: 'session', label: '로그인 세션', description: '수동 로그인 준비와 세션 검증' },
-  { id: 'products', label: '상품 목록', description: '조회, 검색, 필터, 선택' },
-  { id: 'batch', label: '배치 실행', description: 'dry-run, 실행, 중지, 재개' },
-  { id: 'results', label: '실행 결과', description: '성공/잠금/실패와 산출물 확인' },
-  { id: 'retry', label: '실패 재시도', description: '이전 실패 항목으로 재실행' },
-  { id: 'settings', label: '설정', description: '속도, 경로, 셀렉터, 출력 제어' },
+  { id: 'dashboard', label: '홈', description: '가장 자주 쓰는 작업' },
+  { id: 'session', label: '로그인', description: '세션 준비와 확인' },
+  { id: 'products', label: '상품', description: '조회와 선택' },
+  { id: 'batch', label: '실행', description: 'dry-run과 실제 변경' },
+  { id: 'results', label: '결과', description: '실행 이력과 산출물' },
+  { id: 'retry', label: '재시도', description: '실패한 항목만 다시 실행' },
+  { id: 'settings', label: '설정', description: '필요할 때만 여는 고급 옵션' },
 ];
 
 const PRODUCT_STATUS_OPTIONS: ProductStatus[] = [
@@ -65,6 +66,7 @@ export function App() {
   const [selectedRunId, setSelectedRunId] = useState('');
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [logs, setLogs] = useState<readonly RunEvent[]>([]);
+  const [logsOpen, setLogsOpen] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | undefined>();
   const [currentProgress, setCurrentProgress] = useState<
     Extract<RunEvent, { type: 'job-progress' }> | null
@@ -217,6 +219,10 @@ export function App() {
 
   async function handlePrepareSession(): Promise<void> {
     setSessionBusy(true);
+    setNotice({
+      tone: 'info',
+      text: '로그인 창을 열었습니다. 로그인 후 창을 직접 닫지 말고 자동으로 저장될 때까지 잠시 기다려 주세요.',
+    });
 
     try {
       const nextSession = await window.desktopApi.session.prepare({
@@ -460,9 +466,10 @@ export function App() {
   if (booting || !settingsDraft || !settings) {
     return (
       <div className="boot-screen">
-        <div className="boot-card">
-          <h1>Smart Store Desktop Operator</h1>
-          <p>Electron 셸과 Playwright 인프라를 불러오는 중입니다.</p>
+        <div className="boot-card boot-brand-card">
+          <BrandLogo subtitle="SMART STORE OPERATOR" />
+          <h1>Wishfigure Seller Desk</h1>
+          <p>로그인 상태와 운영 화면을 준비하는 중입니다.</p>
         </div>
       </div>
     );
@@ -475,10 +482,11 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <p className="eyebrow">Smart Store</p>
-          <h1>Desktop Operator</h1>
+          <BrandLogo subtitle="SMART STORE OPERATOR" compact />
+          <p className="eyebrow">Wishfigure Smart Store Admin</p>
+          <h1>Seller Desk</h1>
           <p className="muted">
-            운영자가 로그인 세션, 상품 선택, 일괄 변경을 한 화면에서 관리합니다.
+            로그인, 상품 선택, 실행 결과를 한 화면에서 바로 이어서 작업합니다.
           </p>
         </div>
 
@@ -515,15 +523,30 @@ export function App() {
       <main className="main-area">
         <header className="topbar">
           <div>
-            <p className="eyebrow">운영 도구</p>
+            <p className="eyebrow">Wishfigure Seller Desk</p>
             <h2>{getViewTitle(activeView)}</h2>
           </div>
           <div className="topbar-actions">
-            <button type="button" className="secondary-button" onClick={() => void handleValidateSession()}>
-              세션 검증
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setLogsOpen((current) => !current)}
+            >
+              {logsOpen ? '로그 닫기' : '로그 보기'}
             </button>
-            <button type="button" className="primary-button" onClick={() => void handlePrepareSession()}>
-              로그인 준비
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void handleValidateSession()}
+            >
+              세션 확인
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void handlePrepareSession()}
+            >
+              로그인 창 열기
             </button>
           </div>
         </header>
@@ -537,36 +560,41 @@ export function App() {
           </div>
         ) : null}
 
-        <div className="content-grid">
+        <div className={`content-grid ${logsOpen ? 'logs-open' : ''}`}>
           <section className="page-panel">{renderActiveView()}</section>
-          <aside className="log-panel">
-            <div className="panel-header">
-              <div>
-                <h3>실시간 로그</h3>
-                <p className="muted">
-                  main process에서 전달된 로그, 세션 상태, 진행 이벤트를 표시합니다.
-                </p>
+          {logsOpen ? (
+            <aside className="log-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>실시간 로그</h3>
+                  <p className="muted">
+                    세션 상태, 진행 이벤트, main process 로그를 최신순으로 표시합니다.
+                  </p>
+                </div>
               </div>
-            </div>
-            <div className="log-list">
-              {logs.length === 0 ? (
-                <EmptyState
-                  title="아직 로그가 없습니다"
-                  description="로그인 준비나 상품 조회를 시작하면 이벤트가 여기에 나타납니다."
-                />
-              ) : (
-                logs.map((event, index) => (
-                  <div key={`${event.type}-${event.createdAt}-${index}`} className="log-entry">
-                    <div className="log-entry-top">
-                      <StatusBadge value={event.type} tone="event" />
-                      <span className="muted">{event.createdAt}</span>
+              <div className="log-list">
+                {logs.length === 0 ? (
+                  <EmptyState
+                    title="아직 로그가 없습니다"
+                    description="로그인 준비나 상품 조회를 시작하면 이벤트가 여기에 나타납니다."
+                  />
+                ) : (
+                  logs.map((event, index) => (
+                    <div
+                      key={`${event.type}-${event.createdAt}-${index}`}
+                      className="log-entry"
+                    >
+                      <div className="log-entry-top">
+                        <StatusBadge value={event.type} tone="event" />
+                        <span className="muted">{event.createdAt}</span>
+                      </div>
+                      <p>{describeRunEvent(event)}</p>
                     </div>
-                    <p>{describeRunEvent(event)}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </aside>
+                  ))
+                )}
+              </div>
+            </aside>
+          ) : null}
         </div>
       </main>
     </div>
@@ -594,6 +622,38 @@ export function App() {
   function renderDashboardView() {
     return (
       <div className="stack">
+        <section className="hero-card">
+          <div className="hero-copy">
+            <p className="eyebrow">빠른 시작</p>
+            <h3>로그인하고, 상품을 고르고, 실행하면 끝입니다.</h3>
+            <p className="muted">
+              자주 쓰는 세 단계만 앞에 두고, 나머지 고급 기능은 뒤로 숨겼습니다.
+            </p>
+          </div>
+          <div className="button-row wrap">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => setActiveView('session')}
+            >
+              로그인 세션 준비
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setActiveView('products')}
+            >
+              상품 불러오기
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setActiveView('batch')}
+            >
+              실행 화면으로
+            </button>
+          </div>
+        </section>
         <div className="stats-grid">
           <StatCard
             label="세션 상태"
@@ -616,8 +676,8 @@ export function App() {
           <section className="card">
             <div className="panel-header">
               <div>
-                <h3>빠른 작업</h3>
-                <p className="muted">가장 자주 쓰는 작업을 바로 시작할 수 있습니다.</p>
+                <h3>지금 필요한 작업</h3>
+                <p className="muted">현재 상태에 맞는 다음 단계를 바로 실행할 수 있습니다.</p>
               </div>
             </div>
             <div className="button-row wrap">
@@ -665,7 +725,8 @@ export function App() {
             <div>
               <h3>로그인 세션 준비</h3>
               <p className="muted">
-                앱은 ID/PW를 저장하거나 자동 입력하지 않습니다. 브라우저를 열어 사용자가 직접 로그인한 뒤 storageState를 저장합니다.
+                앱은 ID/PW를 저장하거나 자동 입력하지 않습니다. 브라우저를 열어 직접 로그인하고,
+                로그인 완료가 감지되면 storageState를 저장한 뒤 창을 자동으로 정리합니다.
               </p>
             </div>
           </div>
@@ -677,15 +738,20 @@ export function App() {
           </div>
           <div className="button-row">
             <button type="button" className="primary-button" disabled={sessionBusy} onClick={() => void handlePrepareSession()}>
-              {sessionBusy ? '준비 중...' : '로그인 준비 시작'}
+              {sessionBusy ? '로그인 창 확인 중...' : '로그인 준비 시작'}
             </button>
             <button type="button" className="secondary-button" disabled={sessionBusy} onClick={() => void handleValidateSession()}>
-              세션 검증
+              세션 확인
             </button>
             <button type="button" className="ghost-button" onClick={() => void handleOpenPath(currentSettings.storageStatePath)}>
               세션 파일 열기
             </button>
           </div>
+          <ol className="step-list">
+            <li>버튼을 누르면 브라우저가 열립니다.</li>
+            <li>네이버와 스마트스토어에 직접 로그인합니다.</li>
+            <li>상품 목록 화면이 보이면 창을 직접 닫지 말고 자동 저장을 기다립니다.</li>
+          </ol>
         </section>
       </div>
     );

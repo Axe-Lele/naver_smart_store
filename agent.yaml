@@ -1,0 +1,41 @@
+# /agent.yaml
+version: 1
+name: smart-store-desktop-operator
+description: >
+  Project-local agent harness manifest for the Smart Store Desktop Operator.
+  This repository is an Electron + React desktop app over a layered TypeScript
+  core and Playwright infrastructure adapter.
+instructions:
+  - Read AGENTS.md first, then .codex/AGENTS.md.
+  - Keep core/application/infrastructure/shell boundaries intact.
+  - Treat src/* as legacy CLI reference, not the primary implementation surface.
+  - Manual login plus storageState only. Never add credential automation or CAPTCHA/MFA bypass.
+  - Use the selector profile as the single source of truth for DOM locators and authenticated indicators.
+surfaces:
+  agents:
+    - explorer
+    - reviewer
+    - selector-reviewer
+    - release-reviewer
+  skills:
+    - desktop-operator-boundary-check
+    - smartstore-login-session-debug
+    - smartstore-selector-tuning
+    - desktop-release-verification
+  commands:
+    - feature-development
+    - login-session-debug
+    - selector-tuning
+    - release-check
+entrypoints:
+  dev: npm run desktop:dev
+  build: npm run desktop:build
+  dist: npm run desktop:dist
+verification:
+  default:
+    - npm run typecheck
+    - npm run test
+  electron:
+    - npm run desktop:build
+  release:
+    - npm run desktop:dist

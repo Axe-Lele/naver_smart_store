@@ -3,7 +3,10 @@ import path from 'node:path';
 
 import { app, BrowserWindow, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
-import type { AppSettings } from '@smart-store/application';
+import {
+  DEFAULT_SMARTSTORE_PRODUCTS_URL,
+  type AppSettings,
+} from '@smart-store/application';
 import { BatchJobId, type LoginSessionSnapshot } from '@smart-store/core';
 import {
   FileStorageStateRepository,
@@ -87,7 +90,7 @@ export class DesktopAppRuntime {
     this.orchestrator = new PlaywrightBatchExecutionOrchestrator({
       settingsFilePath: path.join(configDir, 'settings.json'),
       defaultSettings: {
-        productsUrl: 'https://sell.smartstore.naver.com/',
+        productsUrl: DEFAULT_SMARTSTORE_PRODUCTS_URL,
         loginMode: 'storageState',
         storageStatePath: path.join(
           authDir,

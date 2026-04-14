@@ -18,6 +18,17 @@ export interface SessionExpectation {
   timeoutMs?: number;
 }
 
+export interface SessionHealthSignals {
+  currentUrl: string;
+  loginFormVisible: boolean;
+  challengeVisible: boolean;
+  accessDeniedVisible: boolean;
+  authenticatedIndicatorVisible: boolean;
+  authenticatedUrlMatched: boolean;
+  expectedPageVisible: boolean;
+  expectedPageName: string;
+}
+
 export class SessionHealthMonitor {
   constructor(
     private readonly selectorProfile: ResolvedSelectorProfile,
@@ -53,80 +64,35 @@ export class SessionHealthMonitor {
       this.selectorProfile.auth.accessDeniedIndicators,
       500,
     );
+    const authenticatedIndicatorVisible = await this.isAnyVisible(
+      page,
+      this.selectorProfile.auth.authenticatedIndicators,
+      500,
+    );
     const expectedPageVisible = await this.isAnyVisible(
       page,
       expectation.expectedSelectors,
       expectation.timeoutMs ?? 8_000,
     );
-
-    if (/login|nidlogin/i.test(currentUrl)) {
-      return {
-        status: 'LOGIN_REQUIRED',
-        reason: 'LOGIN_REDIRECT',
-        loginSessionStatus: 'LOGIN_REQUIRED',
-        currentUrl,
-        detail: 'The browser was redirected to the Naver login page.',
-        expectedPageName: expectation.expectedPageName,
-      };
-    }
-
-    if (challengeVisible) {
-      return {
-        status: 'CHALLENGE_REQUIRED',
-        reason: 'CHALLENGE_REQUIRED',
-        loginSessionStatus: 'CHALLENGE_REQUIRED',
-        currentUrl,
-        detail: 'CAPTCHA or MFA challenge is still visible.',
-        expectedPageName: expectation.expectedPageName,
-      };
-    }
-
-    if (loginFormVisible) {
-      return {
-        status: 'LOGIN_REQUIRED',
-        reason: 'LOGIN_FORM_VISIBLE',
-        loginSessionStatus: 'LOGIN_REQUIRED',
-        currentUrl,
-        detail: 'The Naver login form is visible instead of the Smart Store page.',
-        expectedPageName: expectation.expectedPageName,
-      };
-    }
-
-    if (
-      accessDeniedVisible ||
-      this.selectorProfile.auth.accessDeniedUrlPatterns.some((pattern) =>
+    const authenticatedUrlMatched =
+      this.selectorProfile.auth.authenticatedUrlPatterns.some((pattern) =>
         pattern.test(currentUrl),
-      )
-    ) {
-      return {
-        status: 'ACCESS_DENIED',
-        reason: 'ACCESS_DENIED',
-        loginSessionStatus: 'ACCESS_DENIED',
-        currentUrl,
-        detail: 'An access denied page is visible instead of the Smart Store page.',
-        expectedPageName: expectation.expectedPageName,
-      };
-    }
+      );
 
-    if (expectedPageVisible) {
-      return {
-        status: 'AUTHENTICATED',
-        reason: null,
-        loginSessionStatus: 'READY',
-        currentUrl,
-        detail: `${expectation.expectedPageName} is visible and ready.`,
-        expectedPageName: expectation.expectedPageName,
-      };
-    }
-
-    return {
-      status: 'EXPECTED_PAGE_MISSING',
-      reason: 'EXPECTED_PAGE_MISSING',
-      loginSessionStatus: 'EXPIRED',
+    return classifySessionHealth({
       currentUrl,
-      detail: `${expectation.expectedPageName} did not expose the expected selectors.`,
+      loginFormVisible,
+      challengeVisible,
+      accessDeniedVisible:
+        accessDeniedVisible ||
+        this.selectorProfile.auth.accessDeniedUrlPatterns.some((pattern) =>
+          pattern.test(currentUrl),
+        ),
+      authenticatedIndicatorVisible,
+      authenticatedUrlMatched,
+      expectedPageVisible,
       expectedPageName: expectation.expectedPageName,
-    };
+    });
   }
 
   async assertAuthenticated(
@@ -246,4 +212,86 @@ export class SessionHealthMonitor {
       probe,
     );
   }
+}
+
+export function classifySessionHealth(
+  signals: SessionHealthSignals,
+): SessionProbeResult {
+  if (/login|nidlogin/i.test(signals.currentUrl)) {
+    return {
+      status: 'LOGIN_REQUIRED',
+      reason: 'LOGIN_REDIRECT',
+      loginSessionStatus: 'LOGIN_REQUIRED',
+      currentUrl: signals.currentUrl,
+      detail: 'The browser was redirected to the Naver login page.',
+      expectedPageName: signals.expectedPageName,
+    };
+  }
+
+  if (signals.challengeVisible) {
+    return {
+      status: 'CHALLENGE_REQUIRED',
+      reason: 'CHALLENGE_REQUIRED',
+      loginSessionStatus: 'CHALLENGE_REQUIRED',
+      currentUrl: signals.currentUrl,
+      detail: 'CAPTCHA or MFA challenge is still visible.',
+      expectedPageName: signals.expectedPageName,
+    };
+  }
+
+  if (signals.loginFormVisible) {
+    return {
+      status: 'LOGIN_REQUIRED',
+      reason: 'LOGIN_FORM_VISIBLE',
+      loginSessionStatus: 'LOGIN_REQUIRED',
+      currentUrl: signals.currentUrl,
+      detail: 'The Naver login form is visible instead of the Smart Store page.',
+      expectedPageName: signals.expectedPageName,
+    };
+  }
+
+  if (signals.accessDeniedVisible) {
+    return {
+      status: 'ACCESS_DENIED',
+      reason: 'ACCESS_DENIED',
+      loginSessionStatus: 'ACCESS_DENIED',
+      currentUrl: signals.currentUrl,
+      detail: 'An access denied page is visible instead of the Smart Store page.',
+      expectedPageName: signals.expectedPageName,
+    };
+  }
+
+  if (signals.expectedPageVisible) {
+    return {
+      status: 'AUTHENTICATED',
+      reason: null,
+      loginSessionStatus: 'READY',
+      currentUrl: signals.currentUrl,
+      detail: `${signals.expectedPageName} is visible and ready.`,
+      expectedPageName: signals.expectedPageName,
+    };
+  }
+
+  if (signals.authenticatedIndicatorVisible || signals.authenticatedUrlMatched) {
+    return {
+      status: 'AUTHENTICATED',
+      reason: null,
+      loginSessionStatus: 'READY',
+      currentUrl: signals.currentUrl,
+      detail: [
+        'An authenticated Smart Store page is visible.',
+        `${signals.expectedPageName} selectors were not found yet, but the session itself looks valid.`,
+      ].join(' '),
+      expectedPageName: signals.expectedPageName,
+    };
+  }
+
+  return {
+    status: 'EXPECTED_PAGE_MISSING',
+    reason: 'EXPECTED_PAGE_MISSING',
+    loginSessionStatus: 'EXPIRED',
+    currentUrl: signals.currentUrl,
+    detail: `${signals.expectedPageName} did not expose the expected selectors.`,
+    expectedPageName: signals.expectedPageName,
+  };
 }

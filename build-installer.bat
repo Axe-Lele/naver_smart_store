@@ -7,7 +7,7 @@ set "ELECTRON_RUN_AS_NODE="
 
 echo.
 echo ============================================
-echo Smart Store Desktop Operator Installer Build
+echo Wishfigure Seller Desk Installer Build
 echo ============================================
 echo Workspace: %CD%
 echo.
@@ -46,7 +46,7 @@ if errorlevel 1 goto :fail
 echo.
 echo [OK] Installer build completed successfully.
 echo Output folder: "%CD%\release"
-echo Main installer: "%CD%\release\SmartStoreDesktopOperator-Setup-1.0.0.exe"
+echo Main installer: "%CD%\release\WishfigureSellerDesk-Setup-1.0.0.exe"
 echo.
 pause
 exit /b 0

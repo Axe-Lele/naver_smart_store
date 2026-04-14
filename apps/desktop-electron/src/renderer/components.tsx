@@ -14,7 +14,31 @@ export function StatusBadge(props: {
   value: string;
   tone: 'session' | 'event' | 'neutral';
 }) {
-  return <span className={`status-badge tone-${props.tone}`}>{props.value}</span>;
+  return (
+    <span
+      className={`status-badge tone-${props.tone}`}
+      data-value={props.value}
+    >
+      {props.value}
+    </span>
+  );
+}
+
+export function BrandLogo(props: {
+  subtitle?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`brand-logo ${props.compact ? 'compact' : ''}`}>
+      <div className="brand-logo-mark" aria-hidden="true">
+        <span>W</span>
+      </div>
+      <div className="brand-logo-copy">
+        <strong>WISHFIGURE</strong>
+        <small>{props.subtitle ?? 'SELLER DESK'}</small>
+      </div>
+    </div>
+  );
 }
 
 export function StatCard(props: {
@@ -45,6 +69,54 @@ export function EmptyState(props: { title: string; description: string }) {
     <div className="empty-state">
       <strong>{props.title}</strong>
       <p className="muted">{props.description}</p>
+    </div>
+  );
+}
+
+export function WorkflowCard(props: {
+  step: string;
+  title: string;
+  description: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <article className="workflow-card">
+      <span className="workflow-step">{props.step}</span>
+      <strong>{props.title}</strong>
+      <p className="muted">{props.description}</p>
+      <button type="button" className="secondary-button" onClick={props.onAction}>
+        {props.actionLabel}
+      </button>
+    </article>
+  );
+}
+
+export function ProductSelectionPreview(props: {
+  products: readonly ProductSnapshot[];
+}) {
+  if (props.products.length === 0) {
+    return (
+      <EmptyState
+        title="선택된 상품이 없습니다"
+        description="상품 목록에서 체크박스로 변경 대상을 고르세요."
+      />
+    );
+  }
+
+  return (
+    <div className="selection-preview">
+      {props.products.slice(0, 8).map((product) => (
+        <div key={product.id} className="selection-chip">
+          <strong>{product.id}</strong>
+          <span>{product.name ?? product.status}</span>
+        </div>
+      ))}
+      {props.products.length > 8 ? (
+        <div className="selection-chip more">
+          +{props.products.length - 8}건 더 선택됨
+        </div>
+      ) : null}
     </div>
   );
 }

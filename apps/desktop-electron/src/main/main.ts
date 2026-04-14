@@ -122,9 +122,9 @@ async function createWindow(): Promise<void> {
     minHeight: 860,
     center: true,
     show: true,
-    title: 'Smart Store Desktop Operator',
+    title: 'Wishfigure Seller Desk',
     autoHideMenuBar: true,
-    backgroundColor: '#f3f5f7',
+    backgroundColor: '#f7f9f7',
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

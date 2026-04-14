@@ -1,0 +1,64 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+project_root_markers = [".git", "package.json"]
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+
+persistent_instructions = """
+Read AGENTS.md first, then .codex/AGENTS.md.
+Treat this repository as an operator desktop app with strict Smart Store automation rules:
+- manual login + storageState only
+- no credential automation or CAPTCHA/MFA bypass
+- no unofficial Smart Store API calls
+- keep core/application/infrastructure/electron boundaries intact
+- prefer packages/* and apps/desktop-electron over legacy src/*
+"""
+
+[features]
+multi_agent = true
+shell_snapshot = true
+unified_exec = true
+codex_hooks = true
+
+[profiles.safe_review]
+approval_policy = "on-request"
+sandbox_mode = "read-only"
+web_search = "cached"
+model_reasoning_effort = "high"
+model_verbosity = "medium"
+
+[profiles.live_docs]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "live"
+model_reasoning_effort = "medium"
+model_verbosity = "medium"
+
+[profiles.local_yolo]
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+model_reasoning_effort = "medium"
+model_verbosity = "medium"
+
+[agents]
+max_threads = 4
+max_depth = 2
+
+[agents.explorer]
+description = "Read-only explorer for package ownership, IPC flow, and Playwright adapter boundaries."
+config_file = "agents/explorer.toml"
+
+[agents.reviewer]
+description = "Read-only reviewer for correctness, session safety, and operator-facing regressions."
+config_file = "agents/reviewer.toml"
+
+[agents.selector_reviewer]
+description = "Read-only reviewer for Smart Store selector fragility, login expiry detection, and fallback strategy."
+config_file = "agents/selector-reviewer.toml"
+
+[agents.release_reviewer]
+description = "Read-only reviewer for Electron packaging, installer flow, and release readiness."
+config_file = "agents/release-reviewer.toml"

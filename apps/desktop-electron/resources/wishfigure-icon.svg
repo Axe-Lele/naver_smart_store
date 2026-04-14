@@ -1,0 +1,6 @@
+<!-- /apps/desktop-electron/resources/wishfigure-icon.svg -->
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="152" fill="#111111"/>
+  <path d="M119 150H171L214 334L256 214L298 334L341 150H393L326 390H281L256 285L231 390H186L119 150Z" fill="white"/>
+  <circle cx="394" cy="118" r="38" fill="#03C75A"/>
+</svg>

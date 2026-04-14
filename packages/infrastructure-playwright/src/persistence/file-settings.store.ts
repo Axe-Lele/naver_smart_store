@@ -24,7 +24,13 @@ export class FileSettingsStore implements SettingsStorePort {
       return defaultSettings;
     }
 
-    const loaded = parseAppSettings(await readJsonFile<AppSettingsInput>(this.filePath));
+    const raw = await readJsonFile<AppSettingsInput>(this.filePath);
+    const loaded = parseAppSettings(raw);
+
+    if (JSON.stringify(raw) !== JSON.stringify(loaded)) {
+      await writeJsonFile(this.filePath, loaded);
+    }
+
     this.cache = loaded;
     return loaded;
   }

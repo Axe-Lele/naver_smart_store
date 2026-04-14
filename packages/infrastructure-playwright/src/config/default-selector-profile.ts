@@ -18,6 +18,13 @@ export const defaultSmartStoreSelectorProfile: SelectorProfileConfig = {
       'text=/Access Denied|Permission Denied|Forbidden/',
     ],
     accessDeniedUrlPatterns: ['forbidden', 'denied', 'unauthorized', 'noauth', 'notauthorized'],
+    authenticatedIndicators: [
+      'text=/스마트스토어센터|판매자센터/',
+      'text=/판매상품 관리|판매 상품 관리|상품 조회|상품 관리|상품목록|상품 목록/',
+    ],
+    authenticatedUrlPatterns: [
+      '^https://sell\\.smartstore\\.naver\\.com/',
+    ],
   },
   common: {
     loadingIndicators: [
@@ -41,7 +48,7 @@ export const defaultSmartStoreSelectorProfile: SelectorProfileConfig = {
   },
   productList: {
     pageIdentity: [
-      'text=/상품 조회|상품 목록|판매상품 관리|상품 관리/',
+      'text=/상품 조회|상품 목록|상품목록|판매상품 관리|판매 상품 관리|상품 관리/',
       'h1:has-text("상품")',
       'h2:has-text("상품")',
     ],
@@ -49,6 +56,9 @@ export const defaultSmartStoreSelectorProfile: SelectorProfileConfig = {
       'input[name="productNo"]',
       'input[placeholder*="상품번호"]',
       'input[aria-label*="상품번호"]',
+      'input[placeholder*="검색어"]',
+      'input[placeholder*="상품명"]',
+      'input[aria-label*="검색"]',
       'input[type="search"]',
     ],
     searchButton: [

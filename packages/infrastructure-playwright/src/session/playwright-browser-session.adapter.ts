@@ -14,6 +14,8 @@ export interface ManagedBrowserSession {
   readonly context: BrowserContext;
   readonly page: Page;
   readonly launchMode: BrowserLaunchMode;
+  readonly isClosed: () => boolean;
+  readonly waitForClose: () => Promise<void>;
   close(): Promise<void>;
 }
 
@@ -49,13 +51,23 @@ export class PlaywrightBrowserSessionAdapter {
     });
     this.applyTimeouts(context);
     const page = await context.newPage();
+    const closeTracker = this.createCloseTracker(browser, context, page);
 
     return {
       browser,
       context,
       page,
       launchMode: 'manual',
-      close: async () => browser.close(),
+      isClosed: closeTracker.isClosed,
+      waitForClose: closeTracker.waitForClose,
+      close: async () => {
+        if (closeTracker.isClosed()) {
+          return;
+        }
+
+        await browser.close().catch(() => undefined);
+        closeTracker.markClosed();
+      },
     };
   }
 
@@ -78,13 +90,23 @@ export class PlaywrightBrowserSessionAdapter {
         });
         this.applyTimeouts(context);
         const page = await context.newPage();
+        const closeTracker = this.createCloseTracker(browser, context, page);
 
         return {
           browser,
           context,
           page,
           launchMode: 'storageState',
-          close: async () => browser.close(),
+          isClosed: closeTracker.isClosed,
+          waitForClose: closeTracker.waitForClose,
+          close: async () => {
+            if (closeTracker.isClosed()) {
+              return;
+            }
+
+            await browser.close().catch(() => undefined);
+            closeTracker.markClosed();
+          },
         };
       } catch (error) {
         const invalidSession = LoginSession.create({
@@ -115,12 +137,22 @@ export class PlaywrightBrowserSessionAdapter {
       });
       this.applyTimeouts(context);
       const page = context.pages()[0] ?? (await context.newPage());
+      const closeTracker = this.createCloseTracker(undefined, context, page);
 
       return {
         context,
         page,
         launchMode: 'persistent',
-        close: async () => context.close(),
+        isClosed: closeTracker.isClosed,
+        waitForClose: closeTracker.waitForClose,
+        close: async () => {
+          if (closeTracker.isClosed()) {
+            return;
+          }
+
+          await context.close().catch(() => undefined);
+          closeTracker.markClosed();
+        },
       };
     }
 
@@ -140,5 +172,40 @@ export class PlaywrightBrowserSessionAdapter {
   private applyTimeouts(context: BrowserContext): void {
     context.setDefaultTimeout(this.defaultTimeoutMs);
     context.setDefaultNavigationTimeout(this.defaultNavigationTimeoutMs);
+  }
+
+  private createCloseTracker(
+    browser: Browser | undefined,
+    context: BrowserContext,
+    page: Page,
+  ): {
+    readonly isClosed: () => boolean;
+    readonly waitForClose: () => Promise<void>;
+    markClosed(): void;
+  } {
+    let closed = false;
+    let resolveClosed!: () => void;
+    const closedPromise = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
+
+    const markClosed = () => {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
+      resolveClosed();
+    };
+
+    browser?.on('disconnected', markClosed);
+    context.on('close', markClosed);
+    page.on('close', markClosed);
+
+    return {
+      isClosed: () => closed,
+      waitForClose: () => closedPromise,
+      markClosed,
+    };
   }
 }

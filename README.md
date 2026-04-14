@@ -1,6 +1,6 @@
-# Smart Store Desktop Operator
+# Wishfigure Seller Desk
 
-네이버 스마트스토어 판매자센터 UI에서 예약구매 상품을 일반상품으로 전환하는 Electron + React + Playwright 기반 데스크톱 앱입니다.
+네이버 스마트스토어 판매자센터 UI에서 예약구매 상품을 일반상품으로 전환하는 Electron + React + Playwright 기반 데스크톱 앱입니다. 현재 운영자용 브랜드 이름은 `Wishfigure Seller Desk` 입니다.
 
 중요 정책:
 
@@ -46,6 +46,40 @@
 - `src`
   기존 CLI PoC 코드
 
+## AI 하네스 구성
+
+이 저장소에는 `gemss-his` 스타일을 참고한 프로젝트 로컬 하네스를 추가했습니다. 범용 하네스를 통째로 들이기보다, 현재 `smart-store` 구조에 바로 도움이 되는 최소 구성만 넣었습니다.
+
+- `AGENTS.md`
+  저장소 해석 규칙, 계층 책임, 검증 기준
+- `CLAUDE.md`
+  Claude 계열 도구용 보조 가이드
+- `agent.yaml`
+  프로젝트 하네스 메타 정보
+- `.codex/`
+  Codex 설정, 로컬 에이전트, 안전 훅
+- `.agents/skills/`
+  프로젝트 특화 workflow skill
+- `.claude/commands/`, `.claude/skills/`
+  Claude Code 호환 command / skill surface
+
+하네스가 도와주는 범위:
+
+- destructive shell 명령 차단
+- `.auth`, `secrets`, 실제 `.env` 읽기/수정 경고
+- selector/session/config 변경 경고
+- 종료 시 변경 파일 기준 검증 힌트
+- Smart Store 로그인 세션, selector 튜닝, Electron 릴리즈 검증용 workflow guide
+
+주요 파일:
+
+- `C:\smart-store\AGENTS.md`
+- `C:\smart-store\.codex\config.toml`
+- `C:\smart-store\.codex\hooks.json`
+- `C:\smart-store\.agents\skills`
+- `C:\smart-store\.claude\commands`
+- `C:\smart-store\.claude\skills`
+
 ## 요구 환경
 
 - Node.js 20+
@@ -77,14 +111,14 @@ build-installer.bat
 
 생성 결과:
 
-- `C:\smart-store\release\SmartStoreDesktopOperator-Setup-1.0.0.exe`
+- `C:\smart-store\release\WishfigureSellerDesk-Setup-1.0.0.exe`
 
 설치 후 운영자는 보통 CLI를 다시 입력할 필요 없이, 시작 메뉴 또는 바탕화면 바로가기로 앱을 실행하면 됩니다.
 
 설치형 검증:
 
 - NSIS 설치 파일로 `C:\smart-store\smoke-install` 경로에 실제 설치 테스트 완료
-- 설치 후 `Smart Store Desktop Operator.exe` 실행 시 메인 윈도우 생성 확인
+- 설치 후 `Wishfigure Seller Desk.exe` 실행 시 메인 윈도우 생성 확인
 
 ### 1. 프로젝트 폴더 이동
 
@@ -139,6 +173,20 @@ npm run test
 npm run desktop:build
 ```
 
+하네스 기준 권장 검증:
+
+```cmd
+cd /d C:\smart-store
+npm run verify:desktop
+```
+
+설치형까지 다시 확인하려면:
+
+```cmd
+cd /d C:\smart-store
+npm run verify:release
+```
+
 ## 로그인 세션 준비 방법
 
 앱은 아이디/비밀번호를 저장하지 않습니다.
@@ -149,7 +197,7 @@ npm run desktop:build
 2. `로그인 준비 시작` 버튼을 누릅니다.
 3. 열린 브라우저에서 네이버/스마트스토어에 직접 로그인합니다.
 4. CAPTCHA, MFA, 추가 본인확인이 나오면 사람이 직접 처리합니다.
-5. 상품 목록 화면이 확인되면 세션이 `storageState`로 저장됩니다.
+5. 상품 목록 화면이 확인되면 앱이 세션을 `storageState`로 저장하고 로그인 창을 자동으로 정리합니다.
 6. 다시 앱으로 돌아와 `세션 검증` 버튼으로 재사용 가능 여부를 확인합니다.
 
 기본 세션 경로:

@@ -9,6 +9,8 @@ const authSelectorSchema = z.object({
   challengeIndicators: selectorListSchema,
   accessDeniedIndicators: selectorListSchema,
   accessDeniedUrlPatterns: selectorListSchema,
+  authenticatedIndicators: optionalSelectorListSchema,
+  authenticatedUrlPatterns: optionalSelectorListSchema,
 });
 
 const commonSelectorSchema = z.object({
@@ -66,6 +68,8 @@ export interface ResolvedSelectorProfile {
     readonly challengeIndicators: readonly string[];
     readonly accessDeniedIndicators: readonly string[];
     readonly accessDeniedUrlPatterns: readonly RegExp[];
+    readonly authenticatedIndicators: readonly string[];
+    readonly authenticatedUrlPatterns: readonly RegExp[];
   };
   readonly common: {
     readonly loadingIndicators: readonly string[];
@@ -114,6 +118,10 @@ export function resolveSelectorProfile(
       challengeIndicators: parsed.auth.challengeIndicators,
       accessDeniedIndicators: parsed.auth.accessDeniedIndicators,
       accessDeniedUrlPatterns: parsed.auth.accessDeniedUrlPatterns.map((pattern) =>
+        new RegExp(pattern, 'i'),
+      ),
+      authenticatedIndicators: parsed.auth.authenticatedIndicators,
+      authenticatedUrlPatterns: parsed.auth.authenticatedUrlPatterns.map((pattern) =>
         new RegExp(pattern, 'i'),
       ),
     },

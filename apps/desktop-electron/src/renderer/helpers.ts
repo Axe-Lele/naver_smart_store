@@ -93,12 +93,37 @@ export function describeRunEvent(event: RunEvent): string {
 
 export function formatError(error: unknown): string {
   if (error instanceof Error) {
-    return error.message;
+    return buildRichErrorMessage(error);
   }
 
   if (typeof error === 'object' && error !== null && 'message' in error) {
-    return String((error as { message: unknown }).message);
+    return buildRichErrorMessage(error as {
+      message: unknown;
+      details?: unknown;
+      recoveryCommand?: unknown;
+    });
   }
 
   return String(error);
+}
+
+function buildRichErrorMessage(error: {
+  message: unknown;
+  details?: unknown;
+  recoveryCommand?: unknown;
+}): string {
+  const parts = [String(error.message)];
+
+  if (typeof error.details === 'string' && error.details.trim().length > 0) {
+    parts.push(error.details.trim());
+  }
+
+  if (
+    typeof error.recoveryCommand === 'string' &&
+    error.recoveryCommand.trim().length > 0
+  ) {
+    parts.push(`복구: ${error.recoveryCommand.trim()}`);
+  }
+
+  return parts.join('\n\n');
 }

@@ -4,6 +4,7 @@ import type { LoginSession, LoginSessionStatus } from '@smart-store/core';
 export type SessionFailureReason =
   | 'STORAGE_STATE_MISSING'
   | 'STORAGE_STATE_INVALID'
+  | 'MANUAL_WINDOW_CLOSED'
   | 'LOGIN_REDIRECT'
   | 'LOGIN_FORM_VISIBLE'
   | 'CHALLENGE_REQUIRED'
@@ -67,5 +68,16 @@ export class ManualLoginTimeoutError extends PlaywrightInfrastructureError {
   ) {
     super('MANUAL_LOGIN_TIMEOUT', message);
     this.name = 'ManualLoginTimeoutError';
+  }
+}
+
+export class ManualLoginWindowClosedError extends PlaywrightInfrastructureError {
+  constructor(
+    message: string,
+    public readonly session?: LoginSession,
+    public readonly recoveryCommand = 'npm run login:prepare',
+  ) {
+    super('MANUAL_LOGIN_WINDOW_CLOSED', message);
+    this.name = 'ManualLoginWindowClosedError';
   }
 }

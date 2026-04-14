@@ -3,6 +3,14 @@ import { z } from 'zod';
 
 import { RunPolicy, type RunPolicyInput } from '@smart-store/core';
 
+export const DEFAULT_SMARTSTORE_PRODUCTS_URL =
+  'https://sell.smartstore.naver.com/#/products/origin-list';
+
+const legacyProductsUrls = new Set([
+  'https://sell.smartstore.naver.com',
+  'https://sell.smartstore.naver.com/',
+]);
+
 export const loginModeSchema = z.enum(['storageState', 'persistent']);
 export type LoginMode = z.infer<typeof loginModeSchema>;
 
@@ -36,7 +44,20 @@ export type AppSettings = z.output<typeof appSettingsSchema>;
 export type AppSettingsInput = z.input<typeof appSettingsSchema>;
 
 export function parseAppSettings(input: AppSettingsInput): AppSettings {
-  return appSettingsSchema.parse(input);
+  return appSettingsSchema.parse({
+    ...input,
+    productsUrl: normalizeProductsUrl(input.productsUrl),
+  });
+}
+
+export function normalizeProductsUrl(productsUrl: string): string {
+  const normalized = productsUrl.trim();
+
+  if (legacyProductsUrls.has(normalized)) {
+    return DEFAULT_SMARTSTORE_PRODUCTS_URL;
+  }
+
+  return normalized;
 }
 
 export function buildRunPolicyFromSettings(
