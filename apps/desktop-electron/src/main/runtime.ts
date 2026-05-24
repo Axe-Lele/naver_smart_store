@@ -1,7 +1,6 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
 import fs from 'node:fs';
-import { spawn } from 'node:child_process';
 
 import { app, BrowserWindow, clipboard, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
@@ -432,32 +431,20 @@ export class DesktopAppRuntime {
     }
   }
 
-  private async openExternalTarget(target: string): Promise<void> {
-    try {
-      await shell.openExternal(target);
-      return;
-    } catch (error) {
-      if (process.platform !== 'win32') {
-        throw error;
-      }
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn('cmd', ['/c', 'start', '', target], {
-        windowsHide: true,
-      });
-
-      child.once('error', reject);
-      child.once('spawn', () => resolve());
-    });
-  }
-
   private async openChromeTarget(
     target: string,
     fallbackMessage: string,
     options: ChromeLaunchOptions = {},
   ): Promise<void> {
-    const chromePath = await openUrlInChrome(target, options);
+    let chromePath: string | null;
+    try {
+      chromePath = await openUrlInChrome(target, options);
+    } catch (error) {
+      throw new Error(
+        `전용 Chrome 실행에 실패했습니다.${error instanceof Error ? `\n\n${error.message}` : ''}`,
+      );
+    }
+
     if (chromePath) {
       await this.publishLog(
         'info',
@@ -475,21 +462,17 @@ export class DesktopAppRuntime {
     }
 
     await this.publishLog(
-      'warn',
-      'Could not resolve a local Chrome executable. Falling back to shell.openExternal.',
+      'error',
+      'Could not resolve a local Google Chrome executable. Dedicated Chrome was not opened.',
       undefined,
       {
         target,
+        userDataDir: options.userDataDir ?? null,
+        extensionPath: options.extensionPath ?? null,
       },
     );
 
-    try {
-      await this.openExternalTarget(target);
-    } catch (error) {
-      throw new Error(
-        `${fallbackMessage}${error instanceof Error ? `\n\n${error.message}` : ''}`,
-      );
-    }
+    throw new Error(fallbackMessage);
   }
 
   private async createDedicatedChromeLaunchOptions(
@@ -501,13 +484,12 @@ export class DesktopAppRuntime {
     const extensionPath = this.getBundledExtensionPath();
 
     if (!extensionPath) {
-      await this.publishLog(
-        'warn',
-        'Bundled Chrome extension was not found. Dedicated Chrome will open without auto-loading the bridge extension.',
-        undefined,
-        {
-          extensionBuildPath: this.extensionBuildPath,
-        },
+      throw new Error(
+        [
+          '번들된 Chrome 확장 파일을 찾지 못해 전용 Chrome을 열 수 없습니다.',
+          `확장 경로: ${this.extensionBuildPath}`,
+          '앱을 다시 빌드하거나 설치 파일을 다시 설치해 주세요.',
+        ].join('\n'),
       );
     }
 

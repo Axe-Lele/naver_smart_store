@@ -18,6 +18,7 @@ describe('buildChromeLaunchArgs', () => {
     expect(args).toContain('--no-first-run');
     expect(args).toContain('--no-default-browser-check');
     expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
+    expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
     expect(args).toContain('--new-window');
     expect(args.at(-1)).toBe(target);
@@ -35,6 +36,7 @@ describe('buildChromeLaunchArgs', () => {
     });
 
     expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
+    expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
     expect(args).not.toContain('--new-window');
     expect(args.at(-1)).toBe(target);
