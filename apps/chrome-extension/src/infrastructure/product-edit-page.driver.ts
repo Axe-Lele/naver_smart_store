@@ -678,10 +678,46 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
     }
 
     await this.waitForFastHumanAction();
+
+    if (!await this.waitForPreorderEnabledConfirmed()) {
+      return {
+        ok: false,
+        note: "예약구매 설정함 input#preOrder1_1을 페이지 핸들러로 클릭했지만 선택 상태를 확인하지 못했습니다.",
+      };
+    }
+
+    const expanded = await this.ensurePreorderControlsVisibleAfterActivation();
+    if (!expanded.ok) {
+      return expanded;
+    }
+
     return {
       ok: true,
-      note: "예약구매 설정함 input#preOrder1_1을 페이지 핸들러로 클릭했습니다.",
+      note: `예약구매 설정함 버튼을 클릭했고 주문기간 영역이 열렸습니다. ${expanded.note}`,
     };
+  }
+
+  private async ensurePreorderControlsVisibleAfterActivation(): Promise<UiOperationResult> {
+    if (findOrderPeriodFieldRoot(this.documentRef) || findExpandedPreorderSection(this.documentRef)) {
+      return { ok: true, note: "예약구매 상세 컨트롤이 보이는 상태입니다." };
+    }
+
+    const disclosure = await this.openPreorderDisclosureFirst();
+    if (!disclosure.ok) {
+      return {
+        ok: false,
+        note: `예약구매 설정함은 선택됐지만 접힌 상세 영역을 열지 못했습니다. ${disclosure.note}`,
+      };
+    }
+
+    if (!findOrderPeriodFieldRoot(this.documentRef) && !findExpandedPreorderSection(this.documentRef)) {
+      return {
+        ok: false,
+        note: `예약구매 설정함은 선택됐지만 주문기간 입력 영역이 보이지 않습니다. ${disclosure.note}`,
+      };
+    }
+
+    return { ok: true, note: disclosure.note };
   }
 
   private async clickPageOrderStartCalendar(): Promise<UiOperationResult> {
@@ -2648,6 +2684,7 @@ function findPreorderDisclosureControlFromRow(documentRef: Document): Element | 
     .filter((element) => {
       const text = normalizeWhitespace(element.textContent);
       return (
+        isVisible(element) &&
         includesAny(text, PREORDER_HINTS) &&
         includesAny(text, PREORDER_DISABLED_HINTS) &&
         !includesAny(text, NON_PREORDER_SETTING_HINTS) &&
@@ -2755,6 +2792,10 @@ function scorePreorderSectionCandidate(element: Element): number {
   const text = normalizeWhitespace(element.textContent);
   let score = text.length;
 
+  if (!isVisible(element)) {
+    score += 2_000;
+  }
+
   if (includesAny(text, ORDER_PERIOD_HINTS)) {
     score -= 1_000;
   }
@@ -2771,7 +2812,7 @@ function scorePreorderSectionCandidate(element: Element): number {
 }
 
 function hasExpandedPreorderControls(root: Element): boolean {
-  const text = normalizeWhitespace(root.textContent);
+  const text = getVisibleElementText(root);
   return (
     includesAny(text, ORDER_PERIOD_HINTS) ||
     (includesAny(text, PREORDER_ENABLED_HINTS) &&
@@ -2780,7 +2821,7 @@ function hasExpandedPreorderControls(root: Element): boolean {
 }
 
 function isPreorderSettingToggleSection(root: Element): boolean {
-  const text = normalizeWhitespace(root.textContent);
+  const text = getVisibleElementText(root);
   return (
     includesAny(text, PREORDER_ENABLED_HINTS) &&
     includesAny(text, PREORDER_DISABLED_HINTS)
@@ -2800,7 +2841,7 @@ function isPreorderEnabledConfirmed(
   }
 
   const root = findPreorderSectionRoot(surface.section.ownerDocument, surface.section);
-  const text = normalizeWhitespace(root.textContent);
+  const text = getVisibleElementText(root);
   return includesAny(text, ORDER_PERIOD_HINTS);
 }
 
@@ -2894,7 +2935,7 @@ function findPreorderSettingControl(
     row.querySelectorAll(
       "input, button, a, label, [role='radio'], [role='button'], [role='switch'], [role='checkbox']",
     ),
-  ).filter((element) => !isDisabled(element));
+  ).filter((element) => isVisible(element) && !isDisabled(element));
 
   const exact = controls.find((control) =>
     includesAny(resolveElementText(control, documentRef), controlHints),
@@ -2914,8 +2955,9 @@ function findPreorderSettingRow(root: Element): Element | undefined {
     ),
   ]
     .filter((element) => {
-      const text = normalizeWhitespace(element.textContent);
+      const text = getVisibleElementText(element);
       return (
+        isVisible(element) &&
         includesAny(text, PREORDER_HINTS) &&
         includesAny(text, PREORDER_ENABLED_HINTS) &&
         includesAny(text, PREORDER_DISABLED_HINTS) &&
@@ -3147,8 +3189,8 @@ function findOrderPeriodFieldRoot(documentRef: Document): Element | undefined {
   const candidates = Array.from(
     documentRef.querySelectorAll("tr, li, dl, fieldset, section, article, div, label"),
   ).filter((element) => {
-    const text = normalizeWhitespace(element.textContent);
-    return includesAny(text, ORDER_PERIOD_HINTS) && hasDatePickerCandidate(element);
+    const text = getVisibleElementText(element);
+    return isVisible(element) && includesAny(text, ORDER_PERIOD_HINTS) && hasDatePickerCandidate(element);
   });
 
   return candidates.sort(compareOrderPeriodFieldCandidate).at(0);
@@ -3175,8 +3217,10 @@ function scoreOrderPeriodFieldCandidate(element: Element): number {
 
 function hasDatePickerCandidate(element: Element): boolean {
   return (
-    element.querySelector("input") !== null &&
-    element.querySelector("button, a, [role='button']") !== null
+    Array.from(element.querySelectorAll("input")).some(isVisible) &&
+    Array.from(element.querySelectorAll("button, a, [role='button']")).some(
+      (control) => isVisible(control) && !isDisabled(control),
+    )
   );
 }
 
@@ -3185,7 +3229,8 @@ function findCalendarButton(
   documentRef: Document,
   inputIndex: number,
 ): Element | undefined {
-  const buttons = Array.from(root.querySelectorAll("button, a, [role='button']"));
+  const buttons = Array.from(root.querySelectorAll("button, a, [role='button']"))
+    .filter((element) => isVisible(element) && !isDisabled(element));
   const explicit = buttons.filter((element) => isCalendarLikeButton(element, documentRef));
   if (explicit[inputIndex]) {
     return explicit[inputIndex];
@@ -3193,7 +3238,7 @@ function findCalendarButton(
 
   const ordered = Array.from(
     root.querySelectorAll("input, button, a, [role='button']"),
-  );
+  ).filter((element) => isVisible(element) && !isDisabled(element));
   const inputs = ordered.filter(
     (element): element is HTMLInputElement => element instanceof HTMLInputElement,
   );
@@ -4563,6 +4608,32 @@ function resolveElementText(element: Element, documentRef: Document): string {
       .filter(Boolean)
       .join(" "),
   );
+}
+
+function getVisibleElementText(root: Element): string {
+  const parts: string[] = [];
+  const elements = [root, ...Array.from(root.querySelectorAll("*"))];
+
+  for (const element of elements) {
+    if (!isVisible(element)) {
+      continue;
+    }
+
+    for (const node of Array.from(element.childNodes)) {
+      if (node.nodeType === 3) {
+        parts.push(node.textContent ?? "");
+      }
+    }
+
+    parts.push(
+      element.getAttribute("aria-label") ?? "",
+      element.getAttribute("title") ?? "",
+      element instanceof HTMLInputElement ? element.value : "",
+      element instanceof HTMLOptionElement ? element.value : "",
+    );
+  }
+
+  return normalizeWhitespace(parts.join(" "));
 }
 
 function includesAny(value: string | null | undefined, hints: readonly string[]): boolean {

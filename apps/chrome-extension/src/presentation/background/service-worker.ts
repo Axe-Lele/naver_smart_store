@@ -376,9 +376,35 @@ async function clickPagePreorderDisclosure(tabId: number | undefined): Promise<C
 }
 
 function triggerSmartStorePreorderDisclosure(): { ok: boolean; reason?: string } {
-  const selector =
-    '[name="preOrder"] .form-section .title-line .col-lg-11.col-sm-10.col-xs-8.input-content';
-  const element = document.querySelector(selector);
+  const root =
+    document.querySelector('[name="preOrder"]') ??
+    Array.from(document.querySelectorAll("section, article, fieldset, div"))
+      .find((element) => {
+        const text = normalizeVisibleText(element);
+        return text.includes("예약구매") && !text.includes("정기구독");
+      });
+  if (!root) {
+    return { ok: false, reason: "No preorder section root was found." };
+  }
+
+  if (hasVisiblePreorderControls(root)) {
+    return { ok: true };
+  }
+
+  const selectors = [
+    '[name="preOrder"] [aria-expanded="false"]',
+    '[name="preOrder"] .form-section .title-line button',
+    '[name="preOrder"] .form-section .title-line a[role="button"]',
+    '[name="preOrder"] .form-section .title-line [role="button"]',
+    '[name="preOrder"] .form-section .title-line .input-content',
+  ];
+  const selectorCandidate = selectors
+    .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+    .find((candidate) => isUsableDisclosureCandidate(candidate));
+  const element =
+    selectorCandidate ??
+    Array.from(root.querySelectorAll("button, a, summary, [role='button']"))
+      .find((candidate) => isUsableDisclosureCandidate(candidate));
   const pageWindow = window as Window & {
     jQuery?: (target: string | Element) => {
       length?: number;
@@ -391,20 +417,123 @@ function triggerSmartStorePreorderDisclosure(): { ok: boolean; reason?: string }
   };
   const jquery = pageWindow.jQuery ?? pageWindow.$;
 
-  if (typeof jquery === "function") {
-    const collection = jquery(selector);
-    if ((collection.length ?? 1) > 0) {
-      collection.trigger("click");
+  if (element instanceof HTMLElement) {
+    if (typeof jquery === "function") {
+      const collection = jquery(element);
+      if ((collection.length ?? 1) > 0) {
+        collection.trigger("click");
+      } else {
+        element.click();
+      }
+    } else {
+      element.click();
+    }
+
+    if (hasVisiblePreorderControls(root)) {
       return { ok: true };
     }
+
+    return {
+      ok: false,
+      reason: "Clicked preorder disclosure candidate, but visible preorder controls did not open.",
+    };
   }
 
-  if (element instanceof HTMLElement) {
-    element.click();
-    return { ok: true };
+  return { ok: false, reason: "No preorder disclosure candidate was found." };
+
+  function isUsableDisclosureCandidate(candidate: Element): boolean {
+    if (!(candidate instanceof HTMLElement) || !isElementVisible(candidate)) {
+      return false;
+    }
+
+    const text = normalizeText(
+      [
+        candidate.textContent,
+        candidate.getAttribute("aria-label"),
+        candidate.getAttribute("title"),
+        candidate.getAttribute("class"),
+        candidate.getAttribute("id"),
+      ].join(" "),
+    );
+    if (text.includes("설정함") || text.includes("설정안함")) {
+      return false;
+    }
+
+    return (
+      candidate.getAttribute("aria-expanded") === "false" ||
+      text.includes("펼치") ||
+      text.includes("열기") ||
+      text.includes("확장") ||
+      text.includes("arrow") ||
+      text.includes("chevron") ||
+      text.includes("collapse") ||
+      text.includes("toggle") ||
+      text.includes("input-content") ||
+      normalizeText(candidate.textContent).length === 0
+    );
   }
 
-  return { ok: false, reason: `No element matched ${selector}.` };
+  function hasVisiblePreorderControls(section: Element): boolean {
+    const text = normalizeVisibleText(section);
+    return (
+      text.includes("주문기간") ||
+      ((text.includes("설정함") || text.includes("사용함")) &&
+        (text.includes("설정안함") || text.includes("사용안함")))
+    );
+  }
+
+  function normalizeVisibleText(section: Element): string {
+    const parts: string[] = [];
+    for (const element of [section, ...Array.from(section.querySelectorAll("*"))]) {
+      if (!isElementVisible(element)) {
+        continue;
+      }
+
+      for (const node of Array.from(element.childNodes)) {
+        if (node.nodeType === 3) {
+          parts.push(node.textContent ?? "");
+        }
+      }
+
+      parts.push(
+        element.getAttribute("aria-label") ?? "",
+        element.getAttribute("title") ?? "",
+      );
+    }
+
+    return normalizeText(parts.join(" "));
+  }
+
+  function isElementVisible(element: Element): boolean {
+    if (!(element instanceof HTMLElement)) {
+      return true;
+    }
+
+    let current: HTMLElement | null = element;
+    while (current) {
+      if (current.hidden || current.getAttribute("aria-hidden") === "true") {
+        return false;
+      }
+
+      const style = current.ownerDocument.defaultView?.getComputedStyle(current);
+      if (
+        style &&
+        (style.display === "none" ||
+          style.visibility === "hidden" ||
+          Number.parseFloat(style.opacity || "1") === 0)
+      ) {
+        return false;
+      }
+
+      current = current.parentElement;
+    }
+
+    return true;
+  }
+
+  function normalizeText(value: string | null | undefined): string {
+    return (value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
 }
 
 async function clickPagePreorderEnabled(tabId: number | undefined): Promise<CommandResponse> {
