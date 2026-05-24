@@ -171,7 +171,7 @@ export function getRecommendedNextStep(input: {
   if (!input.connected) {
     return input.extensionPackageAvailable === false
       ? '확장 파일이 없습니다. 패키지를 다시 빌드하세요.'
-      : '전용 Chrome을 열고 상품 조회/수정 탭에서 새로고침하세요.';
+      : '전용 브라우저를 열고 상품 조회/수정 탭에서 새로고침하세요.';
   }
 
   if (input.pendingCommand === 'collect-targets') {
@@ -195,7 +195,7 @@ export function getRecommendedNextStep(input: {
   }
 
   if (pageRole === 'login' || pageUrl.includes('login') || pageTitle.includes('로그인')) {
-    return '전용 Chrome에서 로그인을 완료하세요.';
+    return '전용 브라우저에서 로그인을 완료하세요.';
   }
 
   if (

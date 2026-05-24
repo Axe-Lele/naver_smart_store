@@ -31,6 +31,7 @@ const WINDOWS_CHROME_APP_PATH_REGISTRY_KEYS = [
 ] as const;
 
 export type ChromeLaunchOptions = {
+  executablePath?: string;
   newWindow?: boolean;
   userDataDir?: string;
   profileDirectory?: string;
@@ -82,7 +83,12 @@ export async function openUrlInChrome(
   target: string,
   options: ChromeLaunchOptions = {},
 ): Promise<string | null> {
-  const chromePath = await resolveChromeExecutablePath();
+  const explicitChromePath = normalizeChromeExecutablePath(options.executablePath);
+  if (options.executablePath && !explicitChromePath) {
+    return null;
+  }
+
+  const chromePath = explicitChromePath ?? (await resolveChromeExecutablePath());
   if (!chromePath) {
     return null;
   }
@@ -106,6 +112,47 @@ export async function openUrlInChrome(
   });
 
   return chromePath;
+}
+
+export function resolveBundledAutomationBrowserExecutablePath(
+  rootPath: string,
+): string | null {
+  const root = path.resolve(rootPath);
+  if (!fs.existsSync(root)) {
+    return null;
+  }
+
+  const matches: string[] = [];
+  const pending = [root];
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) {
+      continue;
+    }
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+        continue;
+      }
+
+      const resolved = normalizeChromeExecutablePath(entryPath);
+      if (resolved) {
+        matches.push(resolved);
+      }
+    }
+  }
+
+  return matches.sort(compareBundledBrowserCandidates)[0] ?? null;
 }
 
 export function buildChromeLaunchArgs(
@@ -136,6 +183,20 @@ export function buildChromeLaunchArgs(
 
   args.push(target);
   return args;
+}
+
+function compareBundledBrowserCandidates(a: string, b: string): number {
+  return getBundledBrowserCandidateScore(a) - getBundledBrowserCandidateScore(b);
+}
+
+function getBundledBrowserCandidateScore(candidate: string): number {
+  const normalized = candidate.replace(/\\/g, '/').toLowerCase();
+
+  if (normalized.includes('/chrome-win64/chrome.exe')) {
+    return 0;
+  }
+
+  return 1;
 }
 
 async function resolveChromePathFromWindowsRegistry(): Promise<string | null> {
