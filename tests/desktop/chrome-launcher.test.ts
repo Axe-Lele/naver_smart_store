@@ -12,12 +12,14 @@ describe('buildChromeLaunchArgs', () => {
 
     const args = buildChromeLaunchArgs(target, {
       userDataDir,
+      profileDirectory: 'Default',
       extensionPath,
     });
 
     expect(args).toContain('--no-first-run');
     expect(args).toContain('--no-default-browser-check');
     expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
+    expect(args).toContain('--profile-directory=Default');
     expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
     expect(args).toContain('--new-window');
@@ -32,10 +34,12 @@ describe('buildChromeLaunchArgs', () => {
     const args = buildChromeLaunchArgs(target, {
       newWindow: false,
       userDataDir,
+      profileDirectory: 'Default',
       extensionPath,
     });
 
     expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
+    expect(args).toContain('--profile-directory=Default');
     expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
     expect(args).not.toContain('--new-window');

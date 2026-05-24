@@ -188,11 +188,10 @@ export class DesktopAppRuntime {
   }
 
   async openChromeExtensions(): Promise<void> {
-    const settings = await this.orchestrator.settingsStore.loadSettings();
     await this.openChromeTarget(
       'chrome://extensions',
       '전용 Chrome을 열 Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
-      await this.createDedicatedChromeLaunchOptions(settings, { newWindow: false }),
+      await this.createDedicatedChromeLaunchOptions({ newWindow: false }),
     );
   }
 
@@ -201,7 +200,7 @@ export class DesktopAppRuntime {
     await this.openChromeTarget(
       settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
       '전용 Chrome을 열 Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
-      await this.createDedicatedChromeLaunchOptions(settings),
+      await this.createDedicatedChromeLaunchOptions(),
     );
   }
 
@@ -454,6 +453,7 @@ export class DesktopAppRuntime {
           chromePath,
           target,
           userDataDir: options.userDataDir ?? null,
+          profileDirectory: options.profileDirectory ?? null,
           extensionPath: options.extensionPath ?? null,
           extensionLoaded: Boolean(options.extensionPath),
         },
@@ -468,6 +468,7 @@ export class DesktopAppRuntime {
       {
         target,
         userDataDir: options.userDataDir ?? null,
+        profileDirectory: options.profileDirectory ?? null,
         extensionPath: options.extensionPath ?? null,
       },
     );
@@ -476,11 +477,9 @@ export class DesktopAppRuntime {
   }
 
   private async createDedicatedChromeLaunchOptions(
-    settings: AppSettings,
     options: Pick<ChromeLaunchOptions, 'newWindow'> = {},
   ): Promise<ChromeLaunchOptions> {
-    const userDataDir =
-      settings.userDataDir?.trim() || path.join(this.authDir, 'chrome-profile');
+    const userDataDir = this.getDedicatedChromeUserDataDir();
     const extensionPath = this.getBundledExtensionPath();
 
     if (!extensionPath) {
@@ -496,8 +495,13 @@ export class DesktopAppRuntime {
     return {
       ...options,
       userDataDir,
+      profileDirectory: 'Default',
       extensionPath,
     };
+  }
+
+  private getDedicatedChromeUserDataDir(): string {
+    return path.join(this.authDir, 'chrome-profile');
   }
 
   private getBundledExtensionPath(): string | undefined {

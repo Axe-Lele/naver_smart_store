@@ -33,6 +33,7 @@ const WINDOWS_CHROME_APP_PATH_REGISTRY_KEYS = [
 export type ChromeLaunchOptions = {
   newWindow?: boolean;
   userDataDir?: string;
+  profileDirectory?: string;
   extensionPath?: string;
 };
 
@@ -118,6 +119,10 @@ export function buildChromeLaunchArgs(
 
   if (options.userDataDir) {
     args.push(`--user-data-dir=${path.resolve(options.userDataDir)}`);
+  }
+
+  if (options.profileDirectory) {
+    args.push(`--profile-directory=${options.profileDirectory}`);
   }
 
   if (options.extensionPath) {
