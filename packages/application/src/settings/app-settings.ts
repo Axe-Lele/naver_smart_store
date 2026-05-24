@@ -6,6 +6,13 @@ import { RunPolicy, type RunPolicyInput } from '@smart-store/core';
 export const DEFAULT_SMARTSTORE_PRODUCTS_URL =
   'https://sell.smartstore.naver.com/#/products/origin-list';
 
+export const DEFAULT_PREORDER_REQUIRED_OPTIONS = [
+  {
+    name: '해외 유통구조상 예약캔슬 불가',
+    value: '동의합니다.',
+  },
+];
+
 const legacyProductsUrls = new Set([
   'https://sell.smartstore.naver.com',
   'https://sell.smartstore.naver.com/',
@@ -13,6 +20,12 @@ const legacyProductsUrls = new Set([
 
 export const loginModeSchema = z.enum(['storageState', 'persistent']);
 export type LoginMode = z.infer<typeof loginModeSchema>;
+
+export const preorderRequiredOptionSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  value: z.string().trim().min(1).max(200),
+});
+export type PreorderRequiredOption = z.output<typeof preorderRequiredOptionSchema>;
 
 export const appSettingsSchema = z
   .object({
@@ -29,6 +42,11 @@ export const appSettingsSchema = z
     captureHtmlOnFailure: z.boolean().default(true),
     selectorProfileId: z.string().trim().min(1).default('smartstore-default'),
     selectorConfigPath: z.string().trim().min(1).optional(),
+    preorderRequiredOptions: z
+      .array(preorderRequiredOptionSchema)
+      .min(1)
+      .max(20)
+      .default(DEFAULT_PREORDER_REQUIRED_OPTIONS),
   })
   .superRefine((value, ctx) => {
     if (value.loginMode === 'persistent' && !value.userDataDir) {

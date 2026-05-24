@@ -1,4 +1,4 @@
-// File: packages/infrastructure-playwright/src/session/playwright-session-gateway.adapter.ts
+﻿// File: packages/infrastructure-playwright/src/session/playwright-session-gateway.adapter.ts
 import type {
   PrepareLoginSessionCommand,
   SessionGatewayPort,
@@ -169,7 +169,7 @@ export class PlaywrightSessionGatewayAdapter implements SessionGatewayPort {
         '로그인 완료가 확인되기 전에 시간이 초과되었습니다.',
         '브라우저 창을 닫지 말고 스마트스토어 상품 목록 화면이 보일 때까지 기다려 주세요.',
         lastProbe ? `마지막 감지 상태: ${lastProbe.detail}` : '마지막 감지 상태: 확인되지 않음.',
-        '복구: "로그인 준비 시작" 또는 "npm run login:prepare"를 다시 실행하세요.',
+        '복구: "로그인 준비 시작"를 다시 실행하세요.',
       ].join('\n'),
       timedOutSession,
     );
@@ -192,7 +192,7 @@ export class PlaywrightSessionGatewayAdapter implements SessionGatewayPort {
         '로그인 브라우저 창이 세션 저장 전에 닫혔습니다.',
         '이제는 로그인 완료를 감지하면 앱이 storageState를 먼저 저장하고 창을 정리합니다.',
         '로그인 후 창을 직접 닫지 말고 자동으로 닫힐 때까지 잠시 기다려 주세요.',
-        '복구: "로그인 준비 시작" 또는 "npm run login:prepare"를 다시 실행하세요.',
+        '복구: "로그인 준비 시작"를 다시 실행하세요.',
       ].join('\n'),
       session,
     );

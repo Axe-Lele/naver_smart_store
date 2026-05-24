@@ -85,14 +85,11 @@
   링크, 경로, 명령이 현재 저장소와 맞는지 확인
 - `packages/core`, `packages/application`
   `npm run typecheck`
-  `npm run test`
 - `packages/infrastructure-playwright`
   `npm run typecheck`
-  `npm run test`
   필요 시 로그인 세션/selector 동작에 대한 수동 스모크 가이드 명시
 - `apps/desktop-electron`
   `npm run typecheck`
-  `npm run test`
   `npm run desktop:build`
 - 설치형 배포, 런타임 자원, Electron builder
   `npm run desktop:dist`

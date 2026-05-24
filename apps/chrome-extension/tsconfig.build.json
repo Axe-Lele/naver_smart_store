@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "../../dist/apps/chrome-extension",
+    "rootDir": "./src",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["chrome"],
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src/**/*.ts"]
+}

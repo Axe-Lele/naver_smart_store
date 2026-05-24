@@ -1,4 +1,4 @@
-// File: packages/infrastructure-playwright/src/session/session-health-monitor.ts
+﻿// File: packages/infrastructure-playwright/src/session/session-health-monitor.ts
 import { LoginSession } from '@smart-store/core';
 import type { Page } from 'playwright';
 
@@ -37,9 +37,15 @@ export class SessionHealthMonitor {
 
   async probe(page: Page, expectation: SessionExpectation): Promise<SessionProbeResult> {
     if (expectation.landingUrl) {
-      await page.goto(expectation.landingUrl, {
-        waitUntil: 'domcontentloaded',
-      });
+      await page
+        .goto(expectation.landingUrl, {
+          waitUntil: 'domcontentloaded',
+        })
+        .catch((error) => {
+          if (!isRecoverableNavigationError(error)) {
+            throw error;
+          }
+        });
     }
 
     await page
@@ -136,7 +142,7 @@ export class SessionHealthMonitor {
       [
         'Manual login session preparation timed out before the Smart Store page became ready.',
         lastProbe ? `Last observed state: ${lastProbe.detail}` : 'Last observed state: unknown.',
-        `Recovery: run "npm run login:prepare" again and wait until ${expectation.expectedPageName} is visible.`,
+        `Recovery: open Wishfigure Seller Desk, use "판매자센터 열기", and wait until ${expectation.expectedPageName} is visible.`,
       ].join('\n'),
       timedOutSession,
     );
@@ -182,7 +188,7 @@ export class SessionHealthMonitor {
       `Expected page: ${probe.expectedPageName}`,
       `Saved storageState path: ${storageStatePath}`,
       'Recovery:',
-      '1. Run "npm run login:prepare".',
+      '1. Open Wishfigure Seller Desk and use "판매자센터 열기".',
       '2. Log in to Naver Smart Store manually in the opened browser.',
       '3. Complete any CAPTCHA or MFA manually if prompted.',
       '4. Retry the failed action after the new session is saved.',
@@ -208,10 +214,23 @@ export class SessionHealthMonitor {
       probe.reason ?? 'EXPECTED_PAGE_MISSING',
       session,
       recoveryLines.join('\n'),
-      'npm run login:prepare',
+      'Wishfigure Seller Desk에서 판매자센터 열기',
       probe,
     );
   }
+}
+
+function isRecoverableNavigationError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('net::err_aborted') ||
+    message.includes('frame was detached') ||
+    message.includes('maybe frame was detached')
+  );
 }
 
 export function classifySessionHealth(

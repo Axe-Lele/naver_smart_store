@@ -1,10 +1,12 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, clipboard, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
 import {
   DEFAULT_SMARTSTORE_PRODUCTS_URL,
+  DEFAULT_PREORDER_REQUIRED_OPTIONS,
   type AppSettings,
 } from '@smart-store/application';
 import { BatchJobId, type LoginSessionSnapshot } from '@smart-store/core';
@@ -17,6 +19,9 @@ import type {
   ExecuteBatchInput,
   ExportRunReportInput,
   GetRunDetailInput,
+  HybridBridgeCommandState,
+  HybridBridgeState,
+  HybridSendCommandInput,
   ListRecentRunsInput,
   LoadProductsInput,
   RetryFailedItemsInput,
@@ -24,6 +29,9 @@ import type {
   StopBatchInput,
 } from '@smart-store/shared';
 import type { RunEvent } from '@smart-store/application';
+
+import { openUrlInChrome } from './chrome-launcher.js';
+import { HybridBridgeServer } from './hybrid-bridge-server.js';
 
 export class DesktopRunEventPublisher implements RunEventPublisherPort {
   private readonly history: RunEvent[] = [];
@@ -62,6 +70,8 @@ export class DesktopAppRuntime {
 
   private readonly orchestrator: PlaywrightBatchExecutionOrchestrator;
 
+  private readonly hybridBridgeServer: HybridBridgeServer;
+
   private currentJobId?: string;
 
   private lastKnownSession: LoginSessionSnapshot;
@@ -87,6 +97,14 @@ export class DesktopAppRuntime {
     this.eventPublisher = new DesktopRunEventPublisher((event) =>
       this.handleRunEvent(event),
     );
+    const extensionBuildPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'chrome-extension')
+      : path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
+    this.hybridBridgeServer = new HybridBridgeServer({
+      extensionBuildPath,
+      chromeExtensionsUrl: 'chrome://extensions',
+      sellerCenterUrl: DEFAULT_SMARTSTORE_PRODUCTS_URL,
+    });
     this.orchestrator = new PlaywrightBatchExecutionOrchestrator({
       settingsFilePath: path.join(configDir, 'settings.json'),
       defaultSettings: {
@@ -105,6 +123,7 @@ export class DesktopAppRuntime {
         captureScreenshotOnFailure: true,
         captureHtmlOnFailure: true,
         selectorProfileId: 'smartstore-default',
+        preorderRequiredOptions: DEFAULT_PREORDER_REQUIRED_OPTIONS,
       },
       eventPublisher: this.eventPublisher,
       manualLoginTimeoutMs: 10 * 60_000,
@@ -112,6 +131,7 @@ export class DesktopAppRuntime {
   }
 
   async getBootState(): Promise<BootState> {
+    await this.ensureHybridBridgeStarted(false);
     const settings = await this.orchestrator.settingsStore.loadSettings();
     const session = await this.storageStateRepository.loadKnownSession(
       settings.storageStatePath,
@@ -120,6 +140,11 @@ export class DesktopAppRuntime {
     this.lastKnownSession = session.toSnapshot();
 
     return {
+      appInfo: {
+        name: app.getName(),
+        version: app.getVersion(),
+        packaged: app.isPackaged,
+      },
       settings,
       session: session.toSnapshot(),
       recentRuns: recentRuns.map((item) => item.toSnapshot()),
@@ -130,6 +155,48 @@ export class DesktopAppRuntime {
 
   async getSettings(): Promise<AppSettings> {
     return this.orchestrator.settingsStore.loadSettings();
+  }
+
+  async getHybridBridgeState(): Promise<HybridBridgeState> {
+    await this.ensureHybridBridgeStarted(false);
+    return this.hybridBridgeServer.getState();
+  }
+
+  async sendHybridCommand(
+    input: HybridSendCommandInput,
+  ): Promise<HybridBridgeCommandState> {
+    await this.ensureHybridBridgeStarted(true);
+    const command = this.hybridBridgeServer.enqueueCommand(
+      input.type,
+      input.payload,
+    );
+    await this.publishLog(
+      'info',
+      `Queued extension command: ${input.type}`,
+      undefined,
+      {
+        commandId: command.commandId,
+        targetClientId: command.targetClientId ?? null,
+        selectedProductCount: input.payload?.selectedProductIds?.length ?? 0,
+      },
+    );
+    return command;
+  }
+
+  async openChromeExtensions(): Promise<void> {
+    await this.openChromeTarget(
+      'chrome://extensions',
+      'Chrome를 찾지 못해 확장 관리 페이지를 열 수 없습니다. Chrome 설치 경로를 확인해 주세요.',
+      { newWindow: false },
+    );
+  }
+
+  async openSellerCenter(): Promise<void> {
+    const settings = await this.orchestrator.settingsStore.loadSettings();
+    await this.openChromeTarget(
+      settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
+      'Chrome를 찾지 못해 판매자센터를 열 수 없습니다. Chrome 설치 경로를 확인해 주세요.',
+    );
   }
 
   async saveSettings(settings: AppSettings): Promise<AppSettings> {
@@ -332,6 +399,86 @@ export class DesktopAppRuntime {
 
     if (errorMessage) {
       throw new Error(errorMessage);
+    }
+  }
+
+  async copyText(text: string): Promise<void> {
+    clipboard.writeText(text);
+  }
+
+  private async ensureHybridBridgeStarted(throwOnFailure: boolean): Promise<void> {
+    try {
+      await this.hybridBridgeServer.start();
+    } catch (error) {
+      await this.publishLog(
+        'error',
+        'Electron hybrid bridge could not start.',
+        undefined,
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+
+      if (throwOnFailure) {
+        throw error;
+      }
+    }
+  }
+
+  private async openExternalTarget(target: string): Promise<void> {
+    try {
+      await shell.openExternal(target);
+      return;
+    } catch (error) {
+      if (process.platform !== 'win32') {
+        throw error;
+      }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('cmd', ['/c', 'start', '', target], {
+        windowsHide: true,
+      });
+
+      child.once('error', reject);
+      child.once('spawn', () => resolve());
+    });
+  }
+
+  private async openChromeTarget(
+    target: string,
+    fallbackMessage: string,
+    options: { newWindow?: boolean } = {},
+  ): Promise<void> {
+    const chromePath = await openUrlInChrome(target, options);
+    if (chromePath) {
+      await this.publishLog(
+        'info',
+        'Opened target URL in local Chrome.',
+        undefined,
+        {
+          chromePath,
+          target,
+        },
+      );
+      return;
+    }
+
+    await this.publishLog(
+      'warn',
+      'Could not resolve a local Chrome executable. Falling back to shell.openExternal.',
+      undefined,
+      {
+        target,
+      },
+    );
+
+    try {
+      await this.openExternalTarget(target);
+    } catch (error) {
+      throw new Error(
+        `${fallbackMessage}${error instanceof Error ? `\n\n${error.message}` : ''}`,
+      );
     }
   }
 

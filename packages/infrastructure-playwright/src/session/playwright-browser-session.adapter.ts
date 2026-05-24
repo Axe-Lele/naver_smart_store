@@ -1,4 +1,4 @@
-// File: packages/infrastructure-playwright/src/session/playwright-browser-session.adapter.ts
+﻿// File: packages/infrastructure-playwright/src/session/playwright-browser-session.adapter.ts
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
 import type { AppSettings } from '@smart-store/application';
@@ -121,7 +121,7 @@ export class PlaywrightBrowserSessionAdapter {
           [
             `Saved storageState could not be loaded: ${settings.storageStatePath}`,
             'Recovery:',
-            '1. Run "npm run login:prepare".',
+            '1. Open Wishfigure Seller Desk and use "판매자센터 열기".',
             '2. Log in to Naver Smart Store manually in the opened browser.',
             '3. Retry the batch after a new session is saved.',
           ].join('\n'),
@@ -162,7 +162,7 @@ export class PlaywrightBrowserSessionAdapter {
       [
         `Saved storageState file was not found: ${settings.storageStatePath}`,
         'Recovery:',
-        '1. Run "npm run login:prepare".',
+        '1. Open Wishfigure Seller Desk and use "판매자센터 열기".',
         '2. Complete the Smart Store login manually.',
         '3. Retry after the new storageState file is saved.',
       ].join('\n'),

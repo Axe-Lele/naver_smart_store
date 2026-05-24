@@ -1,31 +1,32 @@
 {
   "name": "smart-store",
   "version": "1.0.0",
-  "description": "CLI automation for classifying and converting Smart Store preorder products via the seller center UI.",
+  "description": "Electron desktop operator for setting Smart Store bundle-delivery scoped products as preorder products through the seller center UI.",
   "main": "dist/apps/desktop-electron/main/main.cjs",
   "type": "module",
   "private": true,
   "scripts": {
     "brand:assets": "powershell -ExecutionPolicy Bypass -File scripts/generate-brand-assets.ps1",
-    "login:prepare": "tsx src/cli/login-prepare.ts",
-    "poc": "tsx src/cli/poc.ts",
-    "run": "tsx src/cli/run.ts",
-    "desktop:dev": "set \"ELECTRON_RUN_AS_NODE=\" && electron-vite dev --config apps/desktop-electron/electron.vite.config.ts",
-    "desktop:build": "set \"ELECTRON_RUN_AS_NODE=\" && electron-vite build --config apps/desktop-electron/electron.vite.config.ts",
-    "desktop:preview": "set \"ELECTRON_RUN_AS_NODE=\" && electron-vite preview --config apps/desktop-electron/electron.vite.config.ts",
+    "extension:build": "node scripts/build-chrome-extension.mjs",
+    "extension:typecheck": "tsc -p apps/chrome-extension/tsconfig.build.json --noEmit",
+    "extension:lint": "eslint \"apps/chrome-extension/src/**/*.ts\"",
+    "desktop:dev": "npm run extension:build && set \"ELECTRON_RUN_AS_NODE=\" && electron-vite dev --config apps/desktop-electron/electron.vite.config.ts",
+    "desktop:build": "npm run extension:build && set \"ELECTRON_RUN_AS_NODE=\" && electron-vite build --config apps/desktop-electron/electron.vite.config.ts",
+    "desktop:preview": "npm run extension:build && set \"ELECTRON_RUN_AS_NODE=\" && electron-vite preview --config apps/desktop-electron/electron.vite.config.ts",
     "desktop:prepare-runtime": "node scripts/prepare-playwright-runtime.mjs",
-    "desktop:dist": "npm run brand:assets && npm run desktop:prepare-runtime && npm run desktop:build && electron-builder --win nsis",
+    "release:package": "node scripts/package-release.mjs",
+    "desktop:dist": "npm run brand:assets && npm run extension:build && npm run desktop:prepare-runtime && npm run desktop:build && electron-builder --win nsis && npm run release:package",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run test",
-    "verify:desktop": "npm run check && npm run desktop:build",
-    "verify:release": "npm run check && npm run desktop:dist"
+    "check": "npm run typecheck",
+    "verify:desktop": "npm run typecheck && npm run desktop:build",
+    "verify:extension": "npm run extension:typecheck && npm run extension:build",
+    "verify:release": "npm run typecheck && npm run desktop:dist"
   },
   "keywords": [
     "playwright",
     "typescript",
-    "cli",
     "smartstore"
   ],
   "author": "",
@@ -34,27 +35,30 @@
     "node": ">=20"
   },
   "dependencies": {
-    "commander": "^14.0.1",
-    "dotenv": "^17.2.3",
     "fast-csv": "^5.0.5",
-    "pino": "^10.0.0",
     "playwright": "^1.56.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@types/chrome": "^0.1.29",
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@typescript-eslint/eslint-plugin": "^8.46.1",
+    "@typescript-eslint/parser": "^8.46.1",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^41.2.0",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
+    "eslint": "^8.57.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "prettier": "^3.6.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vite": "^7.3.2",
-    "vitest": "^4.1.3"
+    "vitest": "^3.2.4",
+    "jsdom": "^26.1.0"
   },
   "build": {
     "appId": "com.smartstore.desktopoperator",
@@ -79,11 +83,24 @@
     ],
     "extraResources": [
       {
+        "from": "dist/apps/chrome-extension",
+        "to": "chrome-extension",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": ".playwright-browsers",
         "to": "playwright-runtime",
         "filter": [
           "**/*"
         ]
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "install-chrome-extension-helper.bat",
+        "to": "install-chrome-extension-helper.bat"
       }
     ],
     "asarUnpack": [

@@ -1,31 +1,30 @@
+// File: C:\smart-store\vitest.config.ts
 import path from 'node:path';
-
 import { defineConfig } from 'vitest/config';
 
-const workspaceRoot = __dirname;
-
 export default defineConfig({
-  resolve: {
-    alias: {
-      '@smart-store/core': path.resolve(
-        workspaceRoot,
-        'packages/core/src/index.ts',
-      ),
-      '@smart-store/application': path.resolve(
-        workspaceRoot,
-        'packages/application/src/index.ts',
-      ),
-      '@smart-store/infrastructure-playwright': path.resolve(
-        workspaceRoot,
-        'packages/infrastructure-playwright/src/index.ts',
-      ),
-      '@smart-store/shared': path.resolve(
-        workspaceRoot,
-        'packages/shared/src/index.ts',
-      ),
-    },
-  },
   test: {
     environment: 'node',
+    include: ['tests/**/*.test.ts'],
+    restoreMocks: true,
+    clearMocks: true,
+  },
+  resolve: {
+    alias: {
+      '@smart-store/core': path.resolve(__dirname, 'packages/core/src/index.ts'),
+      '@smart-store/core/*': path.resolve(__dirname, 'packages/core/src/*'),
+      '@smart-store/application': path.resolve(__dirname, 'packages/application/src/index.ts'),
+      '@smart-store/application/*': path.resolve(__dirname, 'packages/application/src/*'),
+      '@smart-store/shared': path.resolve(__dirname, 'packages/shared/src/index.ts'),
+      '@smart-store/shared/*': path.resolve(__dirname, 'packages/shared/src/*'),
+      '@smart-store/infrastructure-playwright': path.resolve(
+        __dirname,
+        'packages/infrastructure-playwright/src/index.ts',
+      ),
+      '@smart-store/infrastructure-playwright/*': path.resolve(
+        __dirname,
+        'packages/infrastructure-playwright/src/*',
+      ),
+    },
   },
 });

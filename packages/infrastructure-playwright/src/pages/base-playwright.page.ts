@@ -27,6 +27,20 @@ export abstract class BasePlaywrightPage {
     return this.page;
   }
 
+  protected async navigate(
+    url: string,
+    waitUntil: 'domcontentloaded' | 'load' | 'networkidle' | 'commit' = 'domcontentloaded',
+  ): Promise<void> {
+    try {
+      await this.page.goto(url, { waitUntil });
+      return;
+    } catch (error) {
+      if (!isRecoverableNavigationError(error)) {
+        throw error;
+      }
+    }
+  }
+
   protected async waitForSettled(extraDelayMs = 0): Promise<void> {
     await this.page
       .waitForLoadState('domcontentloaded', {
@@ -192,4 +206,17 @@ export abstract class BasePlaywrightPage {
 
     return (await locator.innerText().catch(() => '')).trim();
   }
+}
+
+function isRecoverableNavigationError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('net::err_aborted') ||
+    message.includes('frame was detached') ||
+    message.includes('maybe frame was detached')
+  );
 }

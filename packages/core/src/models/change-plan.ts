@@ -11,7 +11,7 @@ import {
 } from '../value-objects/run-policy.js';
 import { DomainValidationError } from '../errors.js';
 
-export const changeActionSchema = z.enum(['CONVERT_PREORDER_TO_NORMAL']);
+export const changeActionSchema = z.enum(['SET_BUNDLE_DELIVERY_PRODUCT_TO_PREORDER']);
 export type ChangeAction = z.infer<typeof changeActionSchema>;
 
 export const changePlanSourceSchema = z.enum([
@@ -23,7 +23,7 @@ export type ChangePlanSource = z.infer<typeof changePlanSourceSchema>;
 
 export const changePlanItemSchema = z.object({
   productId: productIdPrimitiveSchema,
-  requestedAction: changeActionSchema.default('CONVERT_PREORDER_TO_NORMAL'),
+  requestedAction: changeActionSchema.default('SET_BUNDLE_DELIVERY_PRODUCT_TO_PREORDER'),
 });
 
 export type ChangePlanItemInput = z.input<typeof changePlanItemSchema>;
@@ -134,7 +134,7 @@ export class ChangePlan {
         ChangePlanItem.create({
           productId: productId.toString(),
           requestedAction:
-            input.requestedAction ?? 'CONVERT_PREORDER_TO_NORMAL',
+            input.requestedAction ?? 'SET_BUNDLE_DELIVERY_PRODUCT_TO_PREORDER',
         }),
       ),
     );

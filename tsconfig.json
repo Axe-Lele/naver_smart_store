@@ -27,10 +27,9 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["node", "chrome"]
   },
   "include": [
-    "src/**/*.ts",
     "tests/**/*.ts",
     "packages/**/*.ts",
     "packages/**/*.tsx",

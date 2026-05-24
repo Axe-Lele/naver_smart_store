@@ -1,7 +1,11 @@
 // File: packages/shared/src/desktop-contracts.ts
 import { z } from 'zod';
 
-import { appSettingsSchema, type AppSettings } from '@smart-store/application';
+import {
+  appSettingsSchema,
+  preorderRequiredOptionSchema,
+  type AppSettings,
+} from '@smart-store/application';
 import type { RunEvent } from '@smart-store/application';
 import {
   batchJobIdPrimitiveSchema,
@@ -72,7 +76,81 @@ export const openPathInputSchema = z.object({
 });
 export type OpenPathInput = z.output<typeof openPathInputSchema>;
 
+export const copyTextInputSchema = z.object({
+  text: z.string(),
+});
+export type CopyTextInput = z.output<typeof copyTextInputSchema>;
+
+export const updateSettingsInputSchema = appSettingsSchema;
+export type UpdateSettingsInput = z.output<typeof updateSettingsInputSchema>;
+
+export const hybridCommandTypeSchema = z.enum([
+  'check-surface',
+  'run-dom-inspection',
+  'collect-targets',
+  'run-dry-run',
+  'start-batch',
+  'resume-batch',
+  'stop-batch',
+]);
+export type HybridCommandType = z.output<typeof hybridCommandTypeSchema>;
+
+export const hybridCommandPayloadSchema = z.object({
+  selectedProductIds: z.array(productIdPrimitiveSchema).optional(),
+  preorderRequiredOptions: z.array(preorderRequiredOptionSchema).min(1).max(20).optional(),
+});
+export type HybridCommandPayload = z.output<typeof hybridCommandPayloadSchema>;
+
+export const hybridSendCommandInputSchema = z.object({
+  type: hybridCommandTypeSchema,
+  payload: hybridCommandPayloadSchema.optional(),
+});
+export type HybridSendCommandInput = z.output<typeof hybridSendCommandInputSchema>;
+
+export interface HybridBridgeClientState {
+  clientId: string;
+  pageUrl: string;
+  pageTitle: string;
+  lastHeartbeatAt: string;
+  visibilityState?: string;
+  hasFocus?: boolean;
+  pageRole?: 'product-list' | 'product-edit' | 'login' | 'seller-center' | 'other';
+  progress?: unknown;
+}
+
+export interface HybridBridgeCommandState {
+  commandId: string;
+  type: HybridCommandType;
+  payload?: HybridCommandPayload;
+  status: 'QUEUED' | 'COMPLETED' | 'FAILED';
+  queuedAt: string;
+  respondedAt?: string;
+  targetClientId?: string;
+  message?: string;
+  response?: unknown;
+}
+
+export interface HybridBridgeState {
+  serverUrl: string;
+  connected: boolean;
+  activeClientId?: string;
+  activeClient?: HybridBridgeClientState;
+  clients: readonly HybridBridgeClientState[];
+  pendingCommands: number;
+  lastCommand?: HybridBridgeCommandState;
+  extensionBuildPath: string;
+  extensionPackageAvailable: boolean;
+  chromeExtensionsUrl: string;
+  sellerCenterUrl: string;
+  lastError?: string;
+}
+
 export const bootStateSchema = z.object({
+  appInfo: z.object({
+    name: z.string().min(1),
+    version: z.string().min(1),
+    packaged: z.boolean(),
+  }),
   settings: appSettingsSchema,
   session: z.custom<LoginSessionSnapshot>(),
   recentRuns: z.array(z.custom<BatchJobResultSnapshot>()),
@@ -81,6 +159,11 @@ export const bootStateSchema = z.object({
 });
 
 export interface BootState {
+  appInfo: {
+    name: string;
+    version: string;
+    packaged: boolean;
+  };
   settings: AppSettings;
   session: LoginSessionSnapshot;
   recentRuns: readonly BatchJobResultSnapshot[];
@@ -105,19 +188,13 @@ export interface SerializedDesktopError {
 
 export type DesktopInvokeRequest =
   | { command: 'app:getBootState' }
-  | { command: 'settings:get' }
-  | { command: 'settings:save'; payload: AppSettings }
-  | { command: 'session:prepare'; payload?: { initiatedBy?: string } }
-  | { command: 'session:validate' }
-  | { command: 'products:load'; payload?: LoadProductsInput }
-  | { command: 'batch:execute'; payload: ExecuteBatchInput }
-  | { command: 'batch:resume'; payload: ResumeBatchInput }
-  | { command: 'batch:stop'; payload?: StopBatchInput }
-  | { command: 'batch:retry'; payload: RetryFailedItemsInput }
-  | { command: 'history:listRecent'; payload?: ListRecentRunsInput }
-  | { command: 'history:getRunDetail'; payload: GetRunDetailInput }
-  | { command: 'history:export'; payload: ExportRunReportInput }
-  | { command: 'system:openPath'; payload: OpenPathInput };
+  | { command: 'app:updateSettings'; payload: UpdateSettingsInput }
+  | { command: 'hybrid:getState' }
+  | { command: 'hybrid:sendCommand'; payload: HybridSendCommandInput }
+  | { command: 'hybrid:openChromeExtensions' }
+  | { command: 'hybrid:openSellerCenter' }
+  | { command: 'system:openPath'; payload: OpenPathInput }
+  | { command: 'system:copyText'; payload: CopyTextInput };
 
 export type DesktopInvokeResponse<T> =
   | {
@@ -132,34 +209,17 @@ export type DesktopInvokeResponse<T> =
 export interface DesktopApi {
   app: {
     getBootState(): Promise<BootState>;
+    updateSettings(input: UpdateSettingsInput): Promise<AppSettings>;
   };
-  settings: {
-    get(): Promise<AppSettings>;
-    save(input: AppSettings): Promise<AppSettings>;
-  };
-  session: {
-    prepare(input?: { initiatedBy?: string }): Promise<LoginSessionSnapshot>;
-    validate(): Promise<LoginSessionSnapshot>;
-  };
-  products: {
-    load(input?: LoadProductsInput): Promise<readonly ProductSnapshot[]>;
-  };
-  batch: {
-    execute(input: ExecuteBatchInput): Promise<BatchJobResultSnapshot>;
-    resume(input: ResumeBatchInput): Promise<BatchJobResultSnapshot>;
-    stop(input?: StopBatchInput): Promise<void>;
-    retry(input: RetryFailedItemsInput): Promise<BatchJobResultSnapshot>;
-  };
-  history: {
-    listRecent(input?: ListRecentRunsInput): Promise<readonly BatchJobResultSnapshot[]>;
-    getRunDetail(input: GetRunDetailInput): Promise<RunDetail>;
-    export(input: ExportRunReportInput): Promise<{
-      targetPath: string;
-      exportedFiles: readonly string[];
-    }>;
+  hybrid: {
+    getState(): Promise<HybridBridgeState>;
+    sendCommand(input: HybridSendCommandInput): Promise<HybridBridgeCommandState>;
+    openChromeExtensions(): Promise<void>;
+    openSellerCenter(): Promise<void>;
   };
   system: {
     openPath(input: OpenPathInput): Promise<void>;
+    copyText(input: CopyTextInput): Promise<void>;
   };
   events: {
     subscribe(listener: (event: RunEvent) => void): () => void;
@@ -200,4 +260,16 @@ export function parseExportRunReportInput(input: unknown): ExportRunReportInput 
 
 export function parseOpenPathInput(input: unknown): OpenPathInput {
   return openPathInputSchema.parse(input);
+}
+
+export function parseCopyTextInput(input: unknown): CopyTextInput {
+  return copyTextInputSchema.parse(input);
+}
+
+export function parseUpdateSettingsInput(input: unknown): UpdateSettingsInput {
+  return updateSettingsInputSchema.parse(input);
+}
+
+export function parseHybridSendCommandInput(input: unknown): HybridSendCommandInput {
+  return hybridSendCommandInputSchema.parse(input);
 }

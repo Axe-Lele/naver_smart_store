@@ -69,8 +69,15 @@ export const defaultSmartStoreSelectorProfile: SelectorProfileConfig = {
     noResultIndicators: [
       'text=/검색 결과가 없습니다|조회된 상품이 없습니다|상품을 찾을 수 없습니다/',
     ],
-    resultRows: ['table tbody tr', '[role="row"]', 'li', '[class*="product"]'],
+    resultRows: [
+      '.ag-body-viewport .ag-pinned-left-cols-container [role="row"].ag-row',
+      'table tbody tr',
+      '[role="row"]',
+      'li',
+      '[class*="product"]',
+    ],
     editButtons: [
+      'button[data-nclicks-code="itg.edit"]',
       'a:has-text("수정")',
       'button:has-text("수정")',
       '[role="button"]:has-text("수정")',
@@ -84,6 +91,9 @@ export const defaultSmartStoreSelectorProfile: SelectorProfileConfig = {
       'h2:has-text("수정")',
     ],
     saveButtons: [
+      'button[data-nclicks-code="flt.save"][progress-button="vm.submit()"]',
+      'button[data-nclicks-code="flt.save"]',
+      'button[progress-button="vm.submit()"]',
       'button:has-text("저장")',
       'button:has-text("수정완료")',
       '[role="button"]:has-text("저장")',

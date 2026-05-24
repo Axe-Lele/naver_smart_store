@@ -1,0 +1,66 @@
+<!-- Path: C:\smart-store\apps\chrome-extension\popup.html -->
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart Store Assistant</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        width: 300px;
+        background: #f7faf7;
+        color: #1a1f1c;
+      }
+
+      main {
+        padding: 14px;
+      }
+
+      .card {
+        background: #ffffff;
+        border: 1px solid #dce8df;
+        border-radius: 12px;
+        padding: 14px;
+        box-shadow: 0 8px 24px rgba(37, 79, 54, 0.06);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      p {
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .muted {
+        margin: 6px 0 0;
+        color: #55625b;
+      }
+
+      #output {
+        margin: 10px 0 0;
+        font-size: 13px;
+        font-weight: 700;
+        color: #148a2f;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <h1>Wishfigure 확장</h1>
+        <p class="muted">상품 작업은 Seller Desk 앱에서 진행하세요.</p>
+        <p id="output">설치 확인 중...</p>
+      </section>
+    </main>
+    <script type="module" src="./presentation/popup/popup.js"></script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-// File: packages/infrastructure-playwright/src/errors/playwright-infrastructure.error.ts
+﻿// File: packages/infrastructure-playwright/src/errors/playwright-infrastructure.error.ts
 import type { LoginSession, LoginSessionStatus } from '@smart-store/core';
 
 export type SessionFailureReason =
@@ -52,7 +52,7 @@ export class SessionRecoveryRequiredError extends PlaywrightInfrastructureError 
     public readonly reason: SessionFailureReason,
     public readonly session: LoginSession,
     message: string,
-    public readonly recoveryCommand = 'npm run login:prepare',
+    public readonly recoveryCommand = 'Wishfigure Seller Desk에서 판매자센터 열기',
     public readonly probe?: SessionProbeResult,
   ) {
     super('SESSION_RECOVERY_REQUIRED', message);
@@ -64,7 +64,7 @@ export class ManualLoginTimeoutError extends PlaywrightInfrastructureError {
   constructor(
     message: string,
     public readonly session?: LoginSession,
-    public readonly recoveryCommand = 'npm run login:prepare',
+    public readonly recoveryCommand = 'Wishfigure Seller Desk에서 판매자센터 열기',
   ) {
     super('MANUAL_LOGIN_TIMEOUT', message);
     this.name = 'ManualLoginTimeoutError';
@@ -75,7 +75,7 @@ export class ManualLoginWindowClosedError extends PlaywrightInfrastructureError 
   constructor(
     message: string,
     public readonly session?: LoginSession,
-    public readonly recoveryCommand = 'npm run login:prepare',
+    public readonly recoveryCommand = 'Wishfigure Seller Desk에서 판매자센터 열기',
   ) {
     super('MANUAL_LOGIN_WINDOW_CLOSED', message);
     this.name = 'ManualLoginWindowClosedError';

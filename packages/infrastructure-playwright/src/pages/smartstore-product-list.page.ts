@@ -24,9 +24,7 @@ export class SmartStoreProductListPage extends BasePlaywrightPage {
   }
 
   async goto(productsUrl: string): Promise<void> {
-    await this.page.goto(productsUrl, {
-      waitUntil: 'domcontentloaded',
-    });
+    await this.navigate(productsUrl, 'domcontentloaded');
     await this.waitForSettled(500);
   }
 

@@ -1,6 +1,6 @@
 # Wishfigure Seller Desk
 
-네이버 스마트스토어 판매자센터 UI에서 예약구매 상품을 일반상품으로 전환하는 Electron + React + Playwright 기반 데스크톱 앱입니다. 현재 운영자용 브랜드 이름은 `Wishfigure Seller Desk` 입니다.
+네이버 스마트스토어 판매자센터 UI에서 묶음배송 검색 결과 상품만 대상으로 예약구매 설정을 점검/변경하는 운영 도구입니다. 현재 운영자용 기본 구조는 `Electron 대시보드 + Chrome Extension 실행기` 하이브리드입니다.
 
 중요 정책:
 
@@ -8,33 +8,32 @@
 - CAPTCHA/MFA 우회 금지
 - 비공식 내부 API 직접 호출 금지
 - 관리자센터 UI에서 운영자가 직접 할 수 있는 동작만 자동화
-- 기본 로그인 방식은 수동 로그인 + `storageState` 저장
+- 로그인 정보 수집 금지, 이미 로그인된 Chrome 판매자센터 탭 안에서만 실제 수정 수행
 
-기존 CLI PoC도 프로젝트 안에 남아 있지만, 현재 기준 운영자용 진입점은 Electron 앱입니다.
+기존 CLI PoC와 Playwright 단독 흐름도 프로젝트 안에 남아 있지만, 현재 운영자용 기본 진입점은 아래 조합입니다.
 
-즉, 지금 기준으로는 GUI 앱이 맞고, 운영자는 터미널 명령 대신 설치형 앱으로 사용할 수 있게 패키징할 수 있습니다.
+- Electron 앱: 상태 확인, 명령 전송, 진행률/결과 확인
+- Chrome Extension: 로그인된 판매자센터 탭 안에서 실제 DOM 점검과 배치 실행
 
 ## 현재 구현 범위
 
 - Electron main / preload / renderer 분리
-- React + TypeScript 기반 운영 UI
-- 로그인 세션 준비 화면
-- 상품 목록 조회 / 검색 / 필터 / 선택
-- 예약상품 -> 일반상품 배치 실행
+- React + TypeScript 기반 운영 대시보드
+- Chrome Extension MV3 기반 판매자센터 UI 실행기
+- Electron ↔ Chrome 탭 localhost 브리지
+- `DOM inspection`
 - `dry-run`
-- 실시간 로그 패널
-- 실행 결과 / 실패 아티팩트 확인
-- 실패 항목 재시도
+- 배치 시작 / 중단 / 재개
+- 실시간 진행률 표시
 - 설정 화면
-- `storageState` 재사용
-- 세션 만료 감지 및 재로그인 유도
-- 실패 스크린샷 / HTML 저장
-- checkpoint / resume / 연속 실패 제한
+- 설치형 앱 안에 Chrome 확장 빌드 동봉
 
 ## 폴더 개요
 
 - `apps/desktop-electron`
-  Electron 셸, preload, React renderer
+  Electron 셸, preload, React renderer, Chrome 확장 브리지 제어
+- `apps/chrome-extension`
+  Chrome Extension MV3, content script, DOM parser/driver, 배치 실행기
 - `packages/core`
   도메인 모델 / 정책
 - `packages/application`
@@ -102,23 +101,23 @@ npx playwright install
 npm run desktop:dist
 ```
 
-터미널 입력 없이 한 번에 돌리려면 루트의 배치 파일을 실행해도 됩니다.
+설치 파일과 Chrome 확장 폴더를 한 번에 묶으려면 루트의 통합 배치 파일을 실행해도 됩니다.
 
 ```cmd
 cd /d C:\smart-store
-build-installer.bat
+build-installer-and-extension.bat
 ```
 
 생성 결과:
 
-- `C:\smart-store\release\WishfigureSellerDesk-Setup-1.0.0.exe`
+- `C:\smart-store\release\WishfigureSellerDesk-Package\WishfigureSellerDesk-Setup-1.0.0.exe`
+- `C:\smart-store\release\WishfigureSellerDesk-Package\chrome-extension`
 
 설치 후 운영자는 보통 CLI를 다시 입력할 필요 없이, 시작 메뉴 또는 바탕화면 바로가기로 앱을 실행하면 됩니다.
 
-설치형 검증:
+설치형 확인:
 
-- NSIS 설치 파일로 `C:\smart-store\smoke-install` 경로에 실제 설치 테스트 완료
-- 설치 후 `Wishfigure Seller Desk.exe` 실행 시 메인 윈도우 생성 확인
+- `release\win-unpacked` 실행 파일과 NSIS 설치 파일 기준으로 동작 확인
 
 ### 1. 프로젝트 폴더 이동
 
@@ -138,13 +137,13 @@ npm install
 npx playwright install
 ```
 
-### 4. Electron 앱 실행
+### 4. Chrome Extension 빌드 포함 Electron 앱 실행
 
 ```cmd
 npm run desktop:dev
 ```
 
-앱이 뜨면 왼쪽 메뉴에서 `로그인 세션` 화면으로 들어가세요.
+이 스크립트는 확장 빌드까지 같이 수행합니다. 앱이 뜨면 먼저 `chrome://extensions 열기` 와 `확장 폴더 열기` 버튼으로 확장을 Chrome에 로드하세요.
 
 ## Windows CMD 기준 권장 실행 순서
 
@@ -169,7 +168,6 @@ npm run desktop:dist
 ```cmd
 cd /d C:\smart-store
 npm run typecheck
-npm run test
 npm run desktop:build
 ```
 
@@ -187,67 +185,40 @@ cd /d C:\smart-store
 npm run verify:release
 ```
 
-## 로그인 세션 준비 방법
+## 하이브리드 기본 사용 흐름
 
-앱은 아이디/비밀번호를 저장하지 않습니다.
+앱은 아이디/비밀번호를 저장하지 않습니다. 실제 조작은 이미 로그인된 Chrome 판매자센터 탭 안에서만 수행합니다.
 
 운영 절차:
 
-1. 앱에서 `로그인 세션` 화면으로 이동합니다.
-2. `로그인 준비 시작` 버튼을 누릅니다.
-3. 열린 브라우저에서 네이버/스마트스토어에 직접 로그인합니다.
-4. CAPTCHA, MFA, 추가 본인확인이 나오면 사람이 직접 처리합니다.
-5. 상품 목록 화면이 확인되면 앱이 세션을 `storageState`로 저장하고 로그인 창을 자동으로 정리합니다.
-6. 다시 앱으로 돌아와 `세션 검증` 버튼으로 재사용 가능 여부를 확인합니다.
+1. Electron 앱 실행
+2. `chrome://extensions 열기` 클릭
+3. `확장 폴더 열기` 클릭 후 `dist\apps\chrome-extension` 또는 설치형 앱의 `resources\chrome-extension` 폴더를 Chrome에 압축 해제 로드
+4. Chrome에서 스마트스토어 판매자센터 로그인
+5. 상품 조회/수정 화면으로 이동
+6. 상세검색에서 `묶음배송` 조건을 운영자가 먼저 적용
+7. Electron `검증` 화면에서 `현재 탭 확인 -> DOM inspection -> 대상 수집 -> dry-run`
+8. 확인이 끝나면 `실행` 화면에서 `배치 시작`
+9. 필요하면 `배치 중단` 또는 `배치 재개`
 
-기본 세션 경로:
+## dry-run 권장 순서
 
-- `C:\smart-store\.auth\smartstore-storage-state.json`
+1. Chrome에서 판매자센터 로그인
+2. 묶음배송 상세검색 적용
+3. Electron `검증` 화면에서 `현재 탭 확인`
+4. `DOM inspection`
+5. `대상 수집`
+6. `dry-run`
+7. 마지막 브리지 응답 JSON에서 대상 수와 샘플 확인
 
-기본 persistent 프로필 경로:
+## 실제 실행 방법
 
-- `C:\smart-store\.auth\chrome-profile`
-
-## 기본 사용 흐름
-
-### 1. 세션 준비
-
-- `로그인 세션` 화면에서 세션 저장
-- `세션 검증`으로 만료 여부 확인
-
-### 2. 상품 조회
-
-- `상품 목록` 화면에서 검색어 입력
-- 필요하면 상품번호를 여러 줄로 직접 붙여 넣기
-- 상태 필터 선택
-- `상품 불러오기` 실행
-
-### 3. 상품 선택
-
-- 체크박스로 대상 상품 선택
-- `현재 목록 전체 선택/해제` 가능
-
-### 4. 배치 실행
-
-- `배치 실행` 화면 이동
-- `dry-run` 여부 선택
-- `실행 메모 / 요청자` 입력 가능
-- `dry-run 실행` 또는 `실제 변경 실행`
-- 필요 시 `체크포인트 이어 실행`, `실행 중지`
-
-### 5. 결과 확인
-
-- `실행 결과` 화면에서 최근 run 선택
-- 성공 / 잠금 / 실패 요약 확인
-- 실패 항목의 PNG / HTML 아티팩트 열기
-- `리포트 내보내기`로 CSV/JSONL/요약 저장
-
-### 6. 실패 재시도
-
-- `실패 재시도` 화면에서 과거 run 선택
-- `dry-run 재시도` 여부 선택
-- `모든 failed 포함` 옵션 선택 가능
-- 재시도 실행
+1. 위 dry-run 흐름까지 확인
+2. Electron `실행` 화면 이동
+3. `배치 시작`
+4. 진행률 카드에서 `completed/target`, `phase`, 최근 업데이트 시각 확인
+5. 필요하면 `배치 중단`
+6. Chrome 탭이 살아 있고 checkpoint가 남아 있으면 `배치 재개`
 
 ## 설정 파일과 출력 경로
 
@@ -265,24 +236,12 @@ npm run verify:release
 
 설치형 앱 기준 설정/세션/출력은 위 데이터 루트 아래에 저장됩니다.
 
-실행 상태 저장:
+하이브리드 브리지 관련 경로:
 
-- `output\state\jobs`
-- `output\state\item-results`
-- `output\state\batch-results`
-- `output\state\checkpoints`
-- `output\state\control`
+- 개발 모드 확장 빌드: `C:\smart-store\dist\apps\chrome-extension`
+- 설치형 포함 경로: `release\win-unpacked\resources\chrome-extension`
 
-실패 아티팩트:
-
-- `output\screenshots`
-- `output\html`
-
-리포트 출력:
-
-- `output\reports\<jobId>`
-
-## 세션 만료 / 권한 문제 대응
+## Chrome 탭/세션 문제 대응
 
 다음 상황을 감지하면 조용히 실패하지 않고 세션 복구 에러로 처리합니다.
 
@@ -292,20 +251,13 @@ npm run verify:release
 - 접근 권한 없음 페이지가 열림
 - 상품 목록 / 수정 화면 핵심 셀렉터가 사라짐
 
-앱 동작:
-
-- 실패 스크린샷 저장
-- HTML 저장
-- 로그 패널에 원인 기록
-- `로그인 세션` 화면에서 다시 세션 준비하도록 유도
-
 복구 순서:
 
-1. `로그인 세션` 화면으로 이동
-2. `로그인 준비 시작`
-3. 직접 로그인 및 인증 처리
-4. `세션 검증`
-5. `배치 실행` 화면에서 `체크포인트 이어 실행` 또는 `실패 재시도`
+1. Chrome 판매자센터 탭에서 다시 로그인
+2. 묶음배송 상세검색 재적용 여부 확인
+3. Electron `검증` 화면에서 `현재 탭 확인`
+4. 필요하면 `DOM inspection` 다시 실행
+5. `실행` 화면에서 `배치 재개`
 
 ## selector override 방법
 
@@ -334,32 +286,26 @@ npm run verify:release
 ## package.json 기준 주요 스크립트
 
 - `npm run desktop:dev`
-  Electron 개발 실행
+  Chrome 확장 빌드 후 Electron 개발 실행
 - `npm run desktop:build`
-  Electron main/preload/renderer 빌드
+  Chrome 확장 빌드 후 Electron main/preload/renderer 빌드
 - `npm run desktop:dist`
   Windows 설치 파일 생성
 - `npm run desktop:preview`
   Electron preview
 - `npm run typecheck`
   전체 타입 검사
-- `npm run test`
-  핵심 도메인/세션 테스트
 - `npm run check`
-  타입 검사 + 테스트
+  타입 검사
 
-기존 CLI PoC 스크립트도 유지됩니다.
-
-- `npm run login:prepare`
-- `npm run poc`
-- `npm run run`
+기존 `src/*` CLI PoC는 현재 설치형 데스크톱 앱 흐름과 충돌하지 않도록 제거되었습니다.
+운영자는 Electron 앱과 Chrome 확장만 사용합니다.
 
 ## 개발 검증 명령
 
 ```cmd
 cd /d C:\smart-store
 npm run typecheck
-npm run test
 npm run desktop:build
 ```
 

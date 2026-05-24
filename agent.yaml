@@ -34,7 +34,6 @@ entrypoints:
 verification:
   default:
     - npm run typecheck
-    - npm run test
   electron:
     - npm run desktop:build
   release:

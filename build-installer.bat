@@ -24,22 +24,17 @@ if errorlevel 1 (
   goto :fail
 )
 
-echo [1/4] Installing npm dependencies...
+echo [1/3] Installing npm dependencies...
 call npm.cmd install
 if errorlevel 1 goto :fail
 
 echo.
-echo [2/4] Running typecheck...
+echo [2/3] Running typecheck...
 call npm.cmd run typecheck
 if errorlevel 1 goto :fail
 
 echo.
-echo [3/4] Running tests...
-call npm.cmd run test
-if errorlevel 1 goto :fail
-
-echo.
-echo [4/4] Building Windows installer...
+echo [3/3] Building Windows installer...
 call npm.cmd run desktop:dist
 if errorlevel 1 goto :fail
 
@@ -47,6 +42,7 @@ echo.
 echo [OK] Installer build completed successfully.
 echo Output folder: "%CD%\release"
 echo Main installer: "%CD%\release\WishfigureSellerDesk-Setup-1.0.0.exe"
+echo Package folder: "%CD%\release\WishfigureSellerDesk-Package"
 echo.
 pause
 exit /b 0

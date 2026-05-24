@@ -43,36 +43,24 @@ if (!app) {
 
 function createRuntimeFactory(): () => Promise<{
   getBootState(): Promise<unknown>;
-  getSettings(): Promise<unknown>;
-  saveSettings(input: unknown): Promise<unknown>;
-  prepareLoginSession(input?: unknown): Promise<unknown>;
-  validateSession(): Promise<unknown>;
-  loadProducts(input?: unknown): Promise<unknown>;
-  executeBatch(input: unknown): Promise<unknown>;
-  resumeBatch(input: unknown): Promise<unknown>;
-  stopBatch(input?: unknown): Promise<unknown>;
-  retryFailedItems(input: unknown): Promise<unknown>;
-  listRecentRuns(input?: unknown): Promise<unknown>;
-  getRunDetail(input: unknown): Promise<unknown>;
-  exportRunReport(input: unknown): Promise<unknown>;
+  saveSettings(settings: unknown): Promise<unknown>;
+  getHybridBridgeState(): Promise<unknown>;
+  sendHybridCommand(input: unknown): Promise<unknown>;
+  openChromeExtensions(): Promise<unknown>;
+  openSellerCenter(): Promise<unknown>;
   openPath(targetPath: string): Promise<unknown>;
+  copyText(text: string): Promise<unknown>;
 }> {
   let runtimePromise:
     | Promise<{
-        getBootState(): Promise<unknown>;
-        getSettings(): Promise<unknown>;
-        saveSettings(input: unknown): Promise<unknown>;
-        prepareLoginSession(input?: unknown): Promise<unknown>;
-        validateSession(): Promise<unknown>;
-        loadProducts(input?: unknown): Promise<unknown>;
-        executeBatch(input: unknown): Promise<unknown>;
-        resumeBatch(input: unknown): Promise<unknown>;
-        stopBatch(input?: unknown): Promise<unknown>;
-        retryFailedItems(input: unknown): Promise<unknown>;
-        listRecentRuns(input?: unknown): Promise<unknown>;
-        getRunDetail(input: unknown): Promise<unknown>;
-        exportRunReport(input: unknown): Promise<unknown>;
-        openPath(targetPath: string): Promise<unknown>;
+      getBootState(): Promise<unknown>;
+      saveSettings(settings: unknown): Promise<unknown>;
+      getHybridBridgeState(): Promise<unknown>;
+      sendHybridCommand(input: unknown): Promise<unknown>;
+      openChromeExtensions(): Promise<unknown>;
+      openSellerCenter(): Promise<unknown>;
+      openPath(targetPath: string): Promise<unknown>;
+      copyText(text: string): Promise<unknown>;
       }>
     | undefined;
 

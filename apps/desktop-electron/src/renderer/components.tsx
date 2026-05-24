@@ -31,13 +31,25 @@ export function BrandLogo(props: {
   return (
     <div className={`brand-logo ${props.compact ? 'compact' : ''}`}>
       <div className="brand-logo-mark" aria-hidden="true">
-        <span>W</span>
+        <span className="brand-logo-orbit" />
+        <span className="brand-logo-letter">W</span>
       </div>
       <div className="brand-logo-copy">
-        <strong>WISHFIGURE</strong>
-        <small>{props.subtitle ?? 'SELLER DESK'}</small>
+        <strong className="brand-logo-wordmark">Wishfigure</strong>
+        <small className="brand-logo-subtitle">{props.subtitle ?? 'SELLER DESK'}</small>
       </div>
     </div>
+  );
+}
+
+export function VersionPill(props: {
+  version: string;
+  packaged: boolean;
+}) {
+  return (
+    <span className="version-pill">
+      버전 {props.version} · {props.packaged ? '설치형' : '개발 모드'}
+    </span>
   );
 }
 
@@ -89,6 +101,56 @@ export function WorkflowCard(props: {
         {props.actionLabel}
       </button>
     </article>
+  );
+}
+
+export function ActionCard(props: {
+  title: string;
+  description: string;
+  primaryLabel: string;
+  onPrimary: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+  primaryTone?: 'primary' | 'secondary' | 'danger';
+}) {
+  const primaryClass =
+    props.primaryTone === 'danger'
+      ? 'danger-button'
+      : props.primaryTone === 'secondary'
+        ? 'secondary-button'
+        : 'primary-button';
+
+  return (
+    <article className="action-card">
+      <strong>{props.title}</strong>
+      <p className="muted">{props.description}</p>
+      <div className="button-row wrap">
+        <button type="button" className={primaryClass} onClick={props.onPrimary}>
+          {props.primaryLabel}
+        </button>
+        {props.secondaryLabel && props.onSecondary ? (
+          <button type="button" className="secondary-button" onClick={props.onSecondary}>
+            {props.secondaryLabel}
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+export function GuideList(props: {
+  title: string;
+  items: readonly string[];
+}) {
+  return (
+    <section className="guide-card">
+      <h3>{props.title}</h3>
+      <ol className="guide-list">
+        {props.items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

@@ -1,6 +1,15 @@
 <!-- /apps/desktop-electron/resources/wishfigure-icon.svg -->
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="512" height="512" rx="152" fill="#111111"/>
-  <path d="M119 150H171L214 334L256 214L298 334L341 150H393L326 390H281L256 285L231 390H186L119 150Z" fill="white"/>
-  <circle cx="394" cy="118" r="38" fill="#03C75A"/>
+  <defs>
+    <linearGradient id="wishfigure-bg" x1="88" y1="70" x2="430" y2="456" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="0.58" stop-color="#0F261B"/>
+      <stop offset="1" stop-color="#0D4D2B"/>
+    </linearGradient>
+  </defs>
+  <rect x="18" y="18" width="476" height="476" rx="112" fill="url(#wishfigure-bg)"/>
+  <circle cx="386" cy="356" r="132" fill="#24B84F" opacity="0.36"/>
+  <path d="M142 160H196L229 321L256 221L283 321L316 160H370L314 370H267L256 319L245 370H198L142 160Z" fill="#F7FFF8"/>
+  <path d="M154 141C207 96 289 94 346 134" stroke="#3ED675" stroke-width="18" stroke-linecap="round"/>
+  <path d="M364 151C402 199 407 270 374 323" stroke="#B5F5C8" stroke-width="12" stroke-linecap="round" opacity="0.7"/>
 </svg>

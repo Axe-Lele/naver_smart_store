@@ -1,168 +1,359 @@
 // File: apps/desktop-electron/src/renderer/App.tsx
-import { startTransition, useEffect, useState } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AppSettings, RunEvent } from '@smart-store/application';
 import type {
-  BatchJobResultSnapshot,
-  LoginSessionSnapshot,
-  ProductSnapshot,
-  ProductStatus,
-} from '@smart-store/core';
-import type { BootState, RunDetail } from '@smart-store/shared';
+  BootState,
+  HybridBridgeCommandState,
+  HybridBridgeState,
+  HybridCommandPayload,
+  HybridCommandType,
+} from '@smart-store/shared';
 
 import {
   BrandLogo,
-  DetailPair,
   EmptyState,
-  ProductTable,
-  RecentRunsTable,
-  ResultItemsTable,
-  StatCard,
   StatusBadge,
+  VersionPill,
 } from './components.js';
 import {
   describeRunEvent,
-  filterResultItems,
+  describeHybridCommand,
+  formatDateTime,
   formatError,
-  normalizePositiveInt,
-  normalizeProductIdsText,
+  getChromePageLabel,
+  getConnectionLabel,
+  getHybridProgress,
+  getProgressPhaseLabel,
+  getRecommendedNextStep,
+  getSessionLabel,
   type NoticeTone,
-  type ResultBucketFilter,
-  type ViewId,
 } from './helpers.js';
 
-const NAV_ITEMS: Array<{ id: ViewId; label: string; description: string }> = [
-  { id: 'dashboard', label: '홈', description: '가장 자주 쓰는 작업' },
-  { id: 'session', label: '로그인', description: '세션 준비와 확인' },
-  { id: 'products', label: '상품', description: '조회와 선택' },
-  { id: 'batch', label: '실행', description: 'dry-run과 실제 변경' },
-  { id: 'results', label: '결과', description: '실행 이력과 산출물' },
-  { id: 'retry', label: '재시도', description: '실패한 항목만 다시 실행' },
-  { id: 'settings', label: '설정', description: '필요할 때만 여는 고급 옵션' },
-];
+type AppInfo = BootState['appInfo'];
+type AppSettings = BootState['settings'];
+type PreorderRequiredOption = AppSettings['preorderRequiredOptions'][number];
+type RunEvent = BootState['eventHistory'][number];
+type OperatorTab = 'work' | 'logs';
+type ThemeMode = 'light' | 'dark';
+type OperatorLogTone = 'info' | 'warn' | 'error' | 'success' | 'neutral';
+type OperatorLogEntry = {
+  id: string;
+  source: string;
+  level: string;
+  tone: OperatorLogTone;
+  createdAt: string;
+  message: string;
+  context?: Readonly<Record<string, string | number | boolean | null>>;
+};
 
-const PRODUCT_STATUS_OPTIONS: ProductStatus[] = [
-  'UNCLASSIFIED',
-  'NOT_FOUND',
-  'NOT_PREORDER',
-  'EDITABLE_PREORDER',
-  'LOCKED_BY_ORDER_PERIOD',
-  'UI_CHANGED',
-  'UNKNOWN_ERROR',
-];
+const STOP_COMMAND_TIMEOUT_MS = 3_000;
+const THEME_STORAGE_KEY = 'wishfigure-seller-desk-theme';
+
+type LoadedProduct = {
+  productId: string;
+  name?: string;
+  editUrl?: string;
+  channelProductNo?: string;
+  originProductNo?: string;
+  rowTextPreview?: string;
+  sourceVerification?: string;
+};
 
 export function App() {
-  const [activeView, setActiveView] = useState<ViewId>('dashboard');
   const [booting, setBooting] = useState(true);
-  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string } | null>(
-    null,
-  );
+  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string } | null>(null);
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
-  const [session, setSession] = useState<LoginSessionSnapshot | null>(null);
-  const [products, setProducts] = useState<readonly ProductSnapshot[]>([]);
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
-  const [recentRuns, setRecentRuns] = useState<readonly BatchJobResultSnapshot[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState('');
-  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
-  const [logs, setLogs] = useState<readonly RunEvent[]>([]);
-  const [logsOpen, setLogsOpen] = useState(false);
-  const [currentJobId, setCurrentJobId] = useState<string | undefined>();
-  const [currentProgress, setCurrentProgress] = useState<
-    Extract<RunEvent, { type: 'job-progress' }> | null
-  >(null);
-  const [runningBatch, setRunningBatch] = useState(false);
-  const [sessionBusy, setSessionBusy] = useState(false);
-  const [productsBusy, setProductsBusy] = useState(false);
-  const [batchBusy, setBatchBusy] = useState(false);
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const [detailBusy, setDetailBusy] = useState(false);
-  const [productSearchText, setProductSearchText] = useState('');
-  const [productIdsText, setProductIdsText] = useState('');
-  const [productLimit, setProductLimit] = useState('30');
-  const [productStatusFilters, setProductStatusFilters] = useState<ProductStatus[]>(
-    [],
-  );
-  const [batchDryRun, setBatchDryRun] = useState(true);
-  const [batchRequestedBy, setBatchRequestedBy] = useState('');
-  const [retryDryRun, setRetryDryRun] = useState(false);
-  const [retryIncludeAllFailed, setRetryIncludeAllFailed] = useState(false);
-  const [retryRequestedBy, setRetryRequestedBy] = useState('');
-  const [resultBucketFilter, setResultBucketFilter] =
-    useState<ResultBucketFilter>('all');
-  const [resultSearchText, setResultSearchText] = useState('');
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [hybridState, setHybridState] = useState<HybridBridgeState | null>(null);
+  const [eventHistory, setEventHistory] = useState<readonly RunEvent[]>([]);
+  const [activeTab, setActiveTab] = useState<OperatorTab>('work');
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
+  const [products, setProducts] = useState<readonly LoadedProduct[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<readonly string[]>([]);
+  const [productFilter, setProductFilter] = useState('');
+  const [pendingCommand, setPendingCommand] = useState<HybridCommandType | null>(null);
+  const lastRespondedCommandRef = useRef<string | null>(null);
+  const pendingCommandIdRef = useRef<string | null>(null);
+  const pendingCommandTimeoutIdRef = useRef<number | null>(null);
+  const ignoredCommandIdsRef = useRef<Set<string>>(new Set());
+  const cancelPendingTypeRef = useRef<HybridCommandType | null>(null);
 
-  const selectedProducts = products.filter((product) =>
-    selectedProductIds.includes(product.id),
+  const activeProgress = useMemo(
+    () => getHybridProgress(hybridState?.activeClient?.progress),
+    [hybridState],
   );
-  const activeRun = selectedRunId
-    ? recentRuns.find((run) => run.jobId === selectedRunId) ?? null
-    : recentRuns[0] ?? null;
-  const filteredResultItems = filterResultItems(
-    runDetail?.itemResults ?? [],
-    resultBucketFilter,
-    resultSearchText,
+  const shouldHideProgressResults =
+    pendingCommand === 'collect-targets' ||
+    pendingCommand === 'start-batch' ||
+    activeProgress?.phase === 'collecting';
+  const resultByProductId = useMemo(
+    () =>
+      shouldHideProgressResults
+        ? new Map()
+        : new Map((activeProgress?.results ?? []).map((result) => [result.productId, result])),
+    [activeProgress, shouldHideProgressResults],
   );
-  const currentProgressPercent =
-    currentProgress && currentProgress.totalItems > 0
-      ? Math.round((currentProgress.processedItems / currentProgress.totalItems) * 100)
-      : 0;
+  const filteredProducts = useMemo(() => {
+    const keyword = productFilter.trim().toLowerCase();
+    if (!keyword) {
+      return products;
+    }
+
+    return products.filter((product) =>
+      [
+        product.productId,
+        product.name,
+        product.channelProductNo,
+        product.originProductNo,
+        product.rowTextPreview,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword)),
+    );
+  }, [productFilter, products]);
+  const selectedSet = useMemo(
+    () => new Set(selectedProductIds),
+    [selectedProductIds],
+  );
+  const preorderRequiredOptions = useMemo(
+    () => normalizeRequiredOptionsForUi(settings?.preorderRequiredOptions ?? []),
+    [settings?.preorderRequiredOptions],
+  );
+  const hasInvalidRequiredOption = preorderRequiredOptions.some(
+    (option) => option.name.trim().length === 0 || option.value.trim().length === 0,
+  );
+  const requiredOptionsSummary = preorderRequiredOptions
+    .map((option) => `${option.name.trim()} / ${option.value.trim()}`)
+    .join(', ');
+  const completedCount = activeProgress?.completedCount ?? 0;
+  const targetCount = activeProgress?.targetCount ?? selectedProductIds.length;
+  const latestProgressMessage = activeProgress?.logs.at(-1)?.message;
+  const progressLabel = getProgressPhaseLabel(activeProgress?.phase);
+  const isCollectingProducts = pendingCommand === 'collect-targets';
+  const isStartingBatch = pendingCommand === 'start-batch';
+  const isStoppingBatch = pendingCommand === 'stop-batch';
+  const isExecutingBatch = activeProgress?.phase === 'executing';
+  const isStopped = activeProgress?.phase === 'stopped';
+  const isIndeterminateProgress = isCollectingProducts || isStartingBatch || isStoppingBatch;
+  const progressPercent =
+    targetCount > 0 ? Math.min(100, Math.round((completedCount / targetCount) * 100)) : 0;
+  const progressNoteClassName = [
+    'progress-note',
+    isIndeterminateProgress ? 'progress-note-loading' : '',
+    isStopped ? 'progress-note-stopped' : '',
+  ].filter(Boolean).join(' ');
+  const progressBarWidth = isIndeterminateProgress ? '42%' : `${progressPercent}%`;
+  const progressLabelText = isCollectingProducts
+    ? '상품 불러오기'
+    : isStartingBatch
+      ? '작업 시작'
+    : isStoppingBatch
+      ? '작업 중단'
+      : '진행률';
+  const progressTitleText = isCollectingProducts
+    ? '불러오는 중...'
+    : isStartingBatch
+      ? '작업을 시작하는 중...'
+    : isStoppingBatch
+      ? '중단 중...'
+      : isStopped
+        ? '중단됨'
+        : `${completedCount} / ${targetCount} 완료`;
+  const progressDetailText = isCollectingProducts
+    ? 'Chrome 탭에서 현재 페이지 상품을 읽고 있습니다.'
+    : isStartingBatch
+      ? '선택한 상품 작업을 Chrome 탭으로 보내고 있습니다.'
+    : isStoppingBatch
+      ? 'Chrome 탭에 중단 요청을 보내고 있습니다.'
+      : isStopped
+        ? '작업이 중단되었습니다. 다시 실행하면 남은 상품부터 처리합니다.'
+        : activeProgress
+          ? `${progressLabel} · ${latestProgressMessage ?? '진행 상태 확인 중'} · 최근 업데이트 ${formatDateTime(activeProgress.updatedAt)}`
+          : '아직 실행 전입니다.';
+  const allProductsSelected =
+    products.length > 0 && selectedProductIds.length === products.length;
+  const showBlockingProgress =
+    isCollectingProducts || isStartingBatch || isStoppingBatch || isExecutingBatch;
+  const modalProgressTitle = isExecutingBatch && !pendingCommand
+    ? '예약상품 설정 중...'
+    : progressTitleText;
+  const modalProgressDetail = progressDetailText;
+  const modalProgressLabel = isExecutingBatch && !pendingCommand
+    ? '작업 진행'
+    : progressLabelText;
+  const modalProgressBarWidth = isExecutingBatch && !isIndeterminateProgress
+    ? `${progressPercent}%`
+    : progressBarWidth;
+  const modalProgressIsIndeterminate =
+    isIndeterminateProgress || (isExecutingBatch && targetCount === 0);
+  const activePageUrl = hybridState?.activeClient?.pageUrl.toLowerCase() ?? '';
+  const activePageTitle = hybridState?.activeClient?.pageTitle.toLowerCase() ?? '';
+  const isLoginPage = activePageUrl.includes('login') || activePageTitle.includes('로그인');
+  const hasProductListTab = isProductListBridgeState(hybridState);
+  const nextStepText = getRecommendedNextStep({
+    connected: Boolean(hybridState?.connected),
+    activeClient: hybridState?.activeClient,
+    extensionPackageAvailable: hybridState?.extensionPackageAvailable,
+    progress: activeProgress,
+    productCount: products.length,
+    selectedCount: selectedProductIds.length,
+    pendingCommand,
+  });
+  const operatorLogs = useMemo(() => {
+    const entries: OperatorLogEntry[] = [
+      ...eventHistory.map((event, index) => toRunEventLogEntry(event, index)),
+      ...(activeProgress?.logs ?? []).map((log, index) => ({
+        id: `progress-${log.timestamp}-${index}`,
+        source: 'Chrome 확장',
+        level: toLogLevelLabel(log.level),
+        tone: toLogTone(log.level),
+        createdAt: log.timestamp,
+        message: toOperatorMessage(log.message),
+      })),
+    ];
+    const lastCommand = hybridState?.lastCommand;
+
+    if (lastCommand) {
+      entries.push({
+        id: `command-${lastCommand.commandId}-${lastCommand.respondedAt ?? lastCommand.queuedAt}`,
+        source: '명령',
+        level: toCommandStatusLabel(lastCommand.status),
+        tone: lastCommand.status === 'FAILED'
+          ? 'error'
+          : lastCommand.status === 'COMPLETED'
+            ? 'success'
+            : 'info',
+        createdAt: lastCommand.respondedAt ?? lastCommand.queuedAt,
+        message: `${describeHybridCommand(lastCommand.type)} · ${
+          lastCommand.message ? toOperatorMessage(lastCommand.message) : '응답 대기 중'
+        }`,
+      });
+    }
+
+    return entries.sort(
+      (first, second) => readTimestamp(second.createdAt) - readTimestamp(first.createdAt),
+    );
+  }, [activeProgress?.logs, eventHistory, hybridState?.lastCommand]);
+  const logErrorCount = operatorLogs.filter((entry) => entry.tone === 'error').length;
+  const latestLogAt = operatorLogs[0]?.createdAt;
+  const progressLogCount = activeProgress?.logs.length ?? 0;
 
   useEffect(() => {
     void bootApplication();
 
-    const unsubscribe = window.desktopApi.events.subscribe((event) => {
-      startTransition(() => {
-        setLogs((current) => [event, ...current].slice(0, 200));
-      });
+    const intervalId = window.setInterval(() => {
+      void refreshHybridState();
+    }, 2_000);
 
-      if (event.type === 'session-state') {
-        setSession((current) => ({
-          storageStatePath:
-            current?.storageStatePath ?? settingsDraft?.storageStatePath ?? '',
-          status: event.status,
-          validatedAt: event.createdAt,
-          lastErrorMessage: event.message,
-          preparedAt: current?.preparedAt,
-          expiresAt: current?.expiresAt,
-        }));
-      }
-
-      if (event.type === 'job-state') {
-        if (event.status === 'RUNNING' || event.status === 'STOP_REQUESTED') {
-          setCurrentJobId(event.jobId);
-          setRunningBatch(true);
-        } else {
-          setCurrentJobId((current) =>
-            current === event.jobId ? undefined : current,
-          );
-          setCurrentProgress((current) =>
-            current?.jobId === event.jobId ? null : current,
-          );
-          setRunningBatch(false);
-          setSelectedRunId(event.jobId);
-          void refreshRecentRuns();
-          void loadRunDetail(event.jobId);
-        }
-      }
-
-      if (event.type === 'job-progress') {
-        setCurrentProgress(event);
-        setCurrentJobId(event.jobId);
-        setRunningBatch(true);
-      }
-    });
-
-    return unsubscribe;
+    return () => {
+      window.clearInterval(intervalId);
+      clearPendingCommandTimeout();
+    };
   }, []);
+
+  useEffect(() => {
+    return window.desktopApi.events.subscribe((event) => {
+      setEventHistory((current) => [event, ...current].slice(0, 300));
+    });
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // Theme persistence is optional; the selected mode still applies in memory.
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    const lastCommand = hybridState?.lastCommand;
+    if (!lastCommand?.respondedAt) {
+      return;
+    }
+
+    const key = `${lastCommand.commandId}:${lastCommand.status}:${lastCommand.respondedAt}`;
+    if (lastRespondedCommandRef.current === key) {
+      return;
+    }
+
+    lastRespondedCommandRef.current = key;
+
+    if (ignoredCommandIdsRef.current.has(lastCommand.commandId)) {
+      ignoredCommandIdsRef.current.delete(lastCommand.commandId);
+      if (pendingCommandIdRef.current === lastCommand.commandId) {
+        clearPendingCommandTimeout();
+        pendingCommandIdRef.current = null;
+      }
+      return;
+    }
+
+    setPendingCommand((current) =>
+      current === lastCommand.type ? null : current,
+    );
+    if (pendingCommandIdRef.current === lastCommand.commandId) {
+      clearPendingCommandTimeout();
+      pendingCommandIdRef.current = null;
+    }
+
+    if (lastCommand.status === 'FAILED') {
+      setNotice({
+        tone: 'error',
+        text: toOperatorMessage(lastCommand.message),
+      });
+      return;
+    }
+
+    if (lastCommand.type === 'collect-targets') {
+      const loadedProducts = readProductsFromResponse(lastCommand.response);
+      setProducts(loadedProducts);
+      setSelectedProductIds(loadedProducts.map((product) => product.productId));
+      setNotice({
+        tone: loadedProducts.length > 0 ? 'success' : 'error',
+        text:
+          loadedProducts.length > 0
+            ? `상품 ${loadedProducts.length}건을 불러왔습니다. 제외할 상품만 체크 해제하세요.`
+            : '불러온 상품이 없습니다. 묶음배송 검색 결과 화면을 확인해 주세요.',
+      });
+      return;
+    }
+
+    if (lastCommand.type === 'start-batch') {
+      setNotice({
+        tone: 'success',
+        text: lastCommand.message ?? '선택한 상품의 예약구매 설정을 시작했습니다.',
+      });
+      return;
+    }
+
+    if (lastCommand.type === 'stop-batch' || lastCommand.type === 'resume-batch') {
+      setNotice({
+        tone: 'info',
+        text: lastCommand.message ?? `${describeHybridCommand(lastCommand.type)} 요청을 처리했습니다.`,
+      });
+      return;
+    }
+
+    setNotice({
+      tone: 'success',
+      text: lastCommand.message ?? `${describeHybridCommand(lastCommand.type)} 작업이 끝났습니다.`,
+    });
+  }, [hybridState?.lastCommand]);
 
   async function bootApplication(): Promise<void> {
     try {
       const bootState = await window.desktopApi.app.getBootState();
-      applyBootState(bootState);
+      startTransition(() => {
+        setAppInfo(bootState.appInfo);
+        setSettings(bootState.settings);
+        setEventHistory(bootState.eventHistory);
+        setSettingsDirty(false);
+      });
+      await refreshHybridState();
       setNotice({
         tone: 'info',
-        text: 'Electron 운영 도구가 준비되었습니다. 세션 상태를 먼저 확인하세요.',
+        text: 'Chrome에서 판매자센터 상품 조회/수정 화면을 연 뒤, 상품 불러오기를 누르면 됩니다.',
       });
     } catch (error) {
       showError(error);
@@ -171,268 +362,392 @@ export function App() {
     }
   }
 
-  function applyBootState(bootState: BootState): void {
-    startTransition(() => {
-      setSettings(bootState.settings);
-      setSettingsDraft(bootState.settings);
-      setSession(bootState.session);
-      setRecentRuns(bootState.recentRuns);
-      setLogs(bootState.eventHistory.slice(0, 200));
-      setCurrentJobId(bootState.currentJobId);
-    });
-
-    if (bootState.recentRuns[0]) {
-      setSelectedRunId(bootState.recentRuns[0].jobId);
-      void loadRunDetail(bootState.recentRuns[0].jobId);
+  async function refreshHybridState(): Promise<void> {
+    try {
+      setHybridState(await window.desktopApi.hybrid.getState());
+    } catch (error) {
+      showError(error);
     }
   }
 
-  async function refreshRecentRuns(): Promise<void> {
+  async function sendHybridCommand(
+    type: HybridCommandType,
+    payload?: HybridCommandPayload,
+  ): Promise<HybridBridgeCommandState | null> {
+    clearPendingCommandTimeout();
+    setPendingCommand(type);
+    pendingCommandIdRef.current = null;
+
     try {
-      const runs = await window.desktopApi.history.listRecent({ limit: 12 });
-      startTransition(() => {
-        setRecentRuns(runs);
-        if (!selectedRunId && runs[0]) {
-          setSelectedRunId(runs[0].jobId);
+      const queued = await window.desktopApi.hybrid.sendCommand({ type, payload });
+      if (cancelPendingTypeRef.current === type) {
+        ignoredCommandIdsRef.current.add(queued.commandId);
+        cancelPendingTypeRef.current = null;
+        setPendingCommand((current) => (current === type ? null : current));
+        await refreshHybridState();
+        return queued;
+      }
+
+      if (queued.status === 'FAILED' || !queued.targetClientId) {
+        if (queued.status !== 'FAILED') {
+          ignoredCommandIdsRef.current.add(queued.commandId);
         }
+        setPendingCommand((current) => (current === type ? null : current));
+        pendingCommandIdRef.current = null;
+        clearPendingCommandTimeout();
+        await refreshHybridState();
+        setNotice({
+          tone: 'error',
+          text:
+            queued.message ??
+            '연결된 Chrome 판매자센터 상품 목록 탭이 없어 요청을 시작하지 않았습니다.',
+        });
+        return queued;
+      }
+
+      pendingCommandIdRef.current = queued.commandId;
+      scheduleCommandResponseTimeout(type, queued.commandId);
+      await refreshHybridState();
+      setNotice({
+        tone: 'info',
+        text: queued.targetClientId
+          ? `${describeHybridCommand(type)} 요청을 Chrome 탭으로 보냈습니다.`
+          : '판매자센터 탭이 연결되면 요청이 자동으로 전달됩니다.',
       });
+      return queued;
     } catch (error) {
+      setPendingCommand(null);
+      pendingCommandIdRef.current = null;
+      clearPendingCommandTimeout();
+      if (cancelPendingTypeRef.current === type) {
+        cancelPendingTypeRef.current = null;
+      }
       showError(error);
+      return null;
     }
   }
 
-  async function loadRunDetail(jobId: string): Promise<void> {
-    setDetailBusy(true);
-
-    try {
-      const detail = await window.desktopApi.history.getRunDetail({ jobId });
-      startTransition(() => {
-        setRunDetail(detail);
-        setSelectedRunId(jobId);
-      });
-    } catch (error) {
-      showError(error);
-    } finally {
-      setDetailBusy(false);
+  function scheduleCommandResponseTimeout(
+    type: HybridCommandType,
+    commandId: string,
+  ): void {
+    if (type !== 'stop-batch') {
+      return;
     }
+
+    pendingCommandTimeoutIdRef.current = window.setTimeout(() => {
+      pendingCommandTimeoutIdRef.current = null;
+
+      if (pendingCommandIdRef.current !== commandId) {
+        return;
+      }
+
+      pendingCommandIdRef.current = null;
+      setPendingCommand((current) => (current === type ? null : current));
+      setNotice({
+        tone: 'error',
+        text: '중단 요청에 3초 동안 응답이 없습니다. 확장프로그램이 꺼졌거나 Chrome 탭 연결이 끊겼을 수 있습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.',
+      });
+      void refreshHybridState();
+    }, STOP_COMMAND_TIMEOUT_MS);
   }
 
-  async function handlePrepareSession(): Promise<void> {
-    setSessionBusy(true);
+  function clearPendingCommandTimeout(): void {
+    if (pendingCommandTimeoutIdRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(pendingCommandTimeoutIdRef.current);
+    pendingCommandTimeoutIdRef.current = null;
+  }
+
+  function handleCancelLoadProducts(): void {
+    if (pendingCommand !== 'collect-targets') {
+      return;
+    }
+
+    const commandId = pendingCommandIdRef.current;
+    if (commandId) {
+      ignoredCommandIdsRef.current.add(commandId);
+    } else {
+      cancelPendingTypeRef.current = 'collect-targets';
+    }
+    pendingCommandIdRef.current = null;
+    setPendingCommand(null);
     setNotice({
       tone: 'info',
-      text: '로그인 창을 열었습니다. 로그인 후 창을 직접 닫지 말고 자동으로 저장될 때까지 잠시 기다려 주세요.',
+      text: '상품 불러오기를 중지했습니다. 늦게 도착한 결과는 화면에 반영하지 않습니다.',
     });
-
-    try {
-      const nextSession = await window.desktopApi.session.prepare({
-        initiatedBy: batchRequestedBy || undefined,
-      });
-      setSession(nextSession);
-      setNotice({
-        tone: 'success',
-        text: `로그인 세션이 저장되었습니다: ${nextSession.storageStatePath}`,
-      });
-    } catch (error) {
-      showError(error);
-    } finally {
-      setSessionBusy(false);
-    }
-  }
-
-  async function handleValidateSession(): Promise<void> {
-    setSessionBusy(true);
-
-    try {
-      const nextSession = await window.desktopApi.session.validate();
-      setSession(nextSession);
-      setNotice({
-        tone: 'success',
-        text: '저장된 세션이 유효하다고 확인되었습니다.',
-      });
-    } catch (error) {
-      showError(error);
-    } finally {
-      setSessionBusy(false);
-    }
   }
 
   async function handleLoadProducts(): Promise<void> {
-    setProductsBusy(true);
-
-    try {
-      const productIds = normalizeProductIdsText(productIdsText);
-      const nextProducts = await window.desktopApi.products.load({
-        searchText: productSearchText || undefined,
-        productIds: productIds.length > 0 ? productIds : undefined,
-        statuses:
-          productStatusFilters.length > 0 ? productStatusFilters : undefined,
-        limit: normalizePositiveInt(productLimit),
-      });
-      startTransition(() => setProducts(nextProducts));
-      setNotice({
-        tone: 'success',
-        text: `${nextProducts.length}건의 상품을 불러왔습니다.`,
-      });
-    } catch (error) {
-      showError(error);
-    } finally {
-      setProductsBusy(false);
+    if (!(await requireProductListTab('상품을 불러오려면'))) {
+      return;
     }
+
+    if (isLoginPage) {
+      setNotice({
+        tone: 'error',
+        text: 'Chrome 탭이 아직 로그인 화면입니다. 판매자센터 로그인을 끝낸 뒤 상품 조회/수정 화면에서 다시 눌러 주세요.',
+      });
+      return;
+    }
+
+    setNotice({
+      tone: 'info',
+      text: 'Chrome 판매자센터 화면에서 상품을 읽고 있습니다. 잠시만 기다려 주세요.',
+    });
+    await sendHybridCommand('collect-targets');
   }
 
-  async function handleExecuteBatch(): Promise<void> {
+  async function handleRunSelected(): Promise<void> {
     if (selectedProductIds.length === 0) {
       setNotice({
         tone: 'error',
-        text: '배치를 실행하려면 최소 1개 상품을 선택해야 합니다.',
+        text: '예약상품으로 설정할 상품을 하나 이상 체크해 주세요.',
       });
       return;
     }
 
-    setBatchBusy(true);
-    setRunningBatch(true);
-
-    try {
-      const result = await window.desktopApi.batch.execute({
-        selectedProductIds,
-        dryRun: batchDryRun,
-        requestedBy: batchRequestedBy || undefined,
-      });
-      await refreshRecentRuns();
-      await loadRunDetail(result.jobId);
-      setActiveView('results');
-      setNotice({
-        tone: 'success',
-        text: `배치 실행이 완료되었습니다. 상태: ${result.status}`,
-      });
-    } catch (error) {
-      showError(error);
-    } finally {
-      setBatchBusy(false);
-      setRunningBatch(false);
-    }
-  }
-
-  async function handleResumeBatch(): Promise<void> {
-    const jobId = selectedRunId || currentJobId;
-    if (!jobId) {
-      setNotice({ tone: 'error', text: '이어 실행할 체크포인트 대상이 없습니다.' });
+    if (!(await requireProductListTab('작업을 시작하려면'))) {
       return;
     }
 
-    setBatchBusy(true);
-    setRunningBatch(true);
-
-    try {
-      const result = await window.desktopApi.batch.resume({ jobId });
-      await refreshRecentRuns();
-      await loadRunDetail(result.jobId);
-      setActiveView('results');
-      setNotice({
-        tone: 'success',
-        text: `체크포인트 이어 실행이 완료되었습니다. 상태: ${result.status}`,
-      });
-    } catch (error) {
-      showError(error);
-    } finally {
-      setBatchBusy(false);
-      setRunningBatch(false);
-    }
-  }
-
-  async function handleStopBatch(): Promise<void> {
-    try {
-      await window.desktopApi.batch.stop({
-        jobId: currentJobId,
-        reason: '운영자가 중지 버튼을 눌렀습니다.',
-      });
-      setNotice({ tone: 'info', text: '배치 중지 요청을 보냈습니다.' });
-    } catch (error) {
-      showError(error);
-    }
-  }
-
-  async function handleRetryFailedItems(): Promise<void> {
-    if (!selectedRunId) {
-      setNotice({ tone: 'error', text: '재시도할 실행 이력을 먼저 선택하세요.' });
+    const requiredOptions = getRunnableRequiredOptions();
+    if (!requiredOptions) {
       return;
     }
 
-    setBatchBusy(true);
-    setRunningBatch(true);
-
-    try {
-      const result = await window.desktopApi.batch.retry({
-        jobId: selectedRunId,
-        dryRun: retryDryRun,
-        includeAllFailed: retryIncludeAllFailed,
-        requestedBy: retryRequestedBy || undefined,
-      });
-      await refreshRecentRuns();
-      await loadRunDetail(result.jobId);
-      setActiveView('results');
-      setNotice({
-        tone: 'success',
-        text: `실패 항목 재시도가 완료되었습니다. 상태: ${result.status}`,
-      });
-    } catch (error) {
-      showError(error);
-    } finally {
-      setBatchBusy(false);
-      setRunningBatch(false);
+    if (settingsDirty) {
+      const saved = await saveRequiredOptions(requiredOptions, false);
+      if (!saved) {
+        return;
+      }
     }
+
+    const confirmed = window.confirm(
+      [
+        `선택한 상품 ${selectedProductIds.length}건을 예약상품으로 설정합니다.`,
+        '',
+        '설정 내용:',
+        '- 예약구매 사용',
+        '- 주문기간 최대값',
+        '- 종료 후 판매상태: 판매중',
+        '- 발송완료일 최대값',
+        `- 필수 옵션 ${requiredOptions.length}개: ${requiredOptions.map((option) => `${option.name} / ${option.value}`).join(', ')}`,
+        '',
+        '계속할까요?',
+      ].join('\n'),
+    );
+    if (!confirmed) {
+      setNotice({
+        tone: 'info',
+        text: '실행을 취소했습니다. 상품 체크 상태를 다시 확인한 뒤 시작할 수 있습니다.',
+      });
+      return;
+    }
+
+    await sendHybridCommand('start-batch', {
+      selectedProductIds: [...selectedProductIds],
+      preorderRequiredOptions: requiredOptions,
+    });
+  }
+
+  function updateRequiredOption(
+    index: number,
+    field: keyof PreorderRequiredOption,
+    value: string,
+  ): void {
+    setSettings((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextOptions = normalizeRequiredOptionsForUi(current.preorderRequiredOptions);
+      nextOptions[index] = {
+        ...nextOptions[index],
+        [field]: value,
+      };
+
+      return {
+        ...current,
+        preorderRequiredOptions: nextOptions,
+      };
+    });
+    setSettingsDirty(true);
+  }
+
+  function addRequiredOption(): void {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            preorderRequiredOptions: [
+              ...normalizeRequiredOptionsForUi(current.preorderRequiredOptions),
+              { name: '', value: '' },
+            ],
+          }
+        : current,
+    );
+    setSettingsDirty(true);
+  }
+
+  function removeRequiredOption(index: number): void {
+    setSettings((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextOptions = normalizeRequiredOptionsForUi(current.preorderRequiredOptions)
+        .filter((_, optionIndex) => optionIndex !== index);
+
+      return {
+        ...current,
+        preorderRequiredOptions:
+          nextOptions.length > 0
+            ? nextOptions
+            : [{ name: '해외 유통구조상 예약캔슬 불가', value: '동의합니다.' }],
+      };
+    });
+    setSettingsDirty(true);
   }
 
   async function handleSaveSettings(): Promise<void> {
-    if (!settingsDraft) {
+    const requiredOptions = getRunnableRequiredOptions();
+    if (!requiredOptions) {
       return;
     }
 
-    setSettingsBusy(true);
+    await saveRequiredOptions(requiredOptions, true);
+  }
 
+  async function saveRequiredOptions(
+    requiredOptions: readonly PreorderRequiredOption[],
+    showSuccessNotice: boolean,
+  ): Promise<boolean> {
+    if (!settings) {
+      setNotice({
+        tone: 'error',
+        text: '설정 정보를 아직 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      });
+      return false;
+    }
+
+    setSavingSettings(true);
     try {
-      const saved = await window.desktopApi.settings.save(sanitizeSettings(settingsDraft));
+      const saved = await window.desktopApi.app.updateSettings({
+        ...settings,
+        preorderRequiredOptions: [...requiredOptions],
+      });
       setSettings(saved);
-      setSettingsDraft(saved);
-      setNotice({ tone: 'success', text: '설정이 저장되었습니다.' });
+      setSettingsDirty(false);
+      if (showSuccessNotice) {
+        setNotice({
+          tone: 'success',
+          text: '상세설정을 저장했습니다. 다음 실행부터 이 옵션 목록을 사용합니다.',
+        });
+      }
+      return true;
     } catch (error) {
       showError(error);
+      return false;
     } finally {
-      setSettingsBusy(false);
+      setSavingSettings(false);
     }
   }
 
-  async function handleExportRunReport(): Promise<void> {
-    if (!selectedRunId) {
-      setNotice({ tone: 'error', text: '내보낼 실행 이력이 없습니다.' });
-      return;
+  function getRunnableRequiredOptions(): PreorderRequiredOption[] | null {
+    if (preorderRequiredOptions.length === 0 || hasInvalidRequiredOption) {
+      setNotice({
+        tone: 'error',
+        text: '상세설정의 필수 옵션명과 옵션값을 모두 입력해 주세요.',
+      });
+      return null;
     }
 
+    return preorderRequiredOptions.map((option) => ({
+      name: option.name.trim(),
+      value: option.value.trim(),
+    }));
+  }
+
+  async function requireProductListTab(prefix: string): Promise<boolean> {
     try {
-      const exported = await window.desktopApi.history.export({ jobId: selectedRunId });
+      const latestState = await window.desktopApi.hybrid.getState();
+      setHybridState(latestState);
+      if (isProductListBridgeState(latestState)) {
+        return true;
+      }
+
+      const pageRole = latestState.activeClient?.pageRole;
+      const pageUrl = latestState.activeClient?.pageUrl.toLowerCase() ?? '';
+      const pageTitle = latestState.activeClient?.pageTitle.toLowerCase() ?? '';
+      const isCurrentLoginPage =
+        pageRole === 'login' || pageUrl.includes('login') || pageTitle.includes('로그인');
+      setPendingCommand(null);
+      pendingCommandIdRef.current = null;
+      setNotice({
+        tone: 'error',
+        text: isCurrentLoginPage
+          ? `${prefix} Chrome에서 로그인을 끝낸 뒤 상품 조회/수정 화면을 열어 주세요.`
+          : `${prefix} Chrome 판매자센터 상품 조회/수정 탭을 열고 Ctrl+R로 새로고침해 주세요.`,
+      });
+      return false;
+    } catch (error) {
+      setPendingCommand(null);
+      pendingCommandIdRef.current = null;
+      showError(error);
+      return false;
+    }
+  }
+
+  async function handleOpenSellerCenter(): Promise<void> {
+    try {
+      await window.desktopApi.hybrid.openSellerCenter();
       setNotice({
         tone: 'success',
-        text: `실행 리포트를 저장했습니다: ${exported.targetPath}`,
+        text: 'Chrome에서 판매자센터를 열었습니다. 로그인 후 상품 조회/수정 화면을 확인해 주세요.',
       });
     } catch (error) {
       showError(error);
     }
   }
 
-  async function handleOpenPath(targetPath?: string): Promise<void> {
-    if (!targetPath) {
+  async function handleExtensionSetupHelper(): Promise<void> {
+    if (!hybridState) {
+      setNotice({
+        tone: 'error',
+        text: '확장 폴더 위치를 아직 확인하지 못했습니다. 잠시 후 다시 눌러 주세요.',
+      });
       return;
     }
 
     try {
-      await window.desktopApi.system.openPath({ targetPath });
+      await window.desktopApi.system.copyText({
+        text: hybridState.extensionBuildPath,
+      });
+      await window.desktopApi.system.openPath({
+        targetPath: hybridState.extensionBuildPath,
+      });
+      await window.desktopApi.hybrid.openChromeExtensions();
+      setNotice({
+        tone: 'success',
+        text:
+          '확장 폴더와 Chrome 확장 관리 화면을 열었습니다. 개발자 모드에서 압축해제된 확장 프로그램 로드를 누르고 열린 폴더를 선택하세요.',
+      });
     } catch (error) {
       showError(error);
     }
   }
 
-  function toggleProductSelection(productId: string): void {
+  function showError(error: unknown): void {
+    setNotice({
+      tone: 'error',
+      text: toOperatorMessage(formatError(error)),
+    });
+  }
+
+  function toggleProduct(productId: string): void {
     setSelectedProductIds((current) =>
       current.includes(productId)
         ? current.filter((id) => id !== productId)
@@ -440,637 +755,722 @@ export function App() {
     );
   }
 
-  function toggleSelectAllProducts(): void {
-    const productIds = products.map((product) => product.id);
-    const everySelected =
-      productIds.length > 0 &&
-      productIds.every((productId) => selectedProductIds.includes(productId));
-    setSelectedProductIds(everySelected ? [] : productIds);
-  }
-
-  function toggleStatusFilter(status: ProductStatus): void {
-    setProductStatusFilters((current) =>
-      current.includes(status)
-        ? current.filter((item) => item !== status)
-        : [...current, status],
+  function toggleAllProducts(): void {
+    setSelectedProductIds(
+      allProductsSelected ? [] : products.map((product) => product.productId),
     );
   }
 
-  function showError(error: unknown): void {
-    setNotice({
-      tone: 'error',
-      text: formatError(error),
-    });
-  }
-
-  if (booting || !settingsDraft || !settings) {
+  if (booting || !appInfo) {
     return (
-      <div className="boot-screen">
+      <div className="boot-screen" data-theme={theme}>
         <div className="boot-card boot-brand-card">
-          <BrandLogo subtitle="SMART STORE OPERATOR" />
+          <BrandLogo subtitle="SELLER DESK" />
           <h1>Wishfigure Seller Desk</h1>
-          <p>로그인 상태와 운영 화면을 준비하는 중입니다.</p>
+          <p>작업 화면을 준비하고 있습니다.</p>
         </div>
       </div>
     );
   }
 
-  const currentSettings = settings;
-  const currentSettingsDraft = settingsDraft;
+  const isExecuting = activeProgress?.phase === 'executing';
+  const isCommandBusy = Boolean(pendingCommand);
+  const isBusy = isCommandBusy || isExecuting;
+  const connectionLabel = getConnectionLabel(Boolean(hybridState?.connected));
+  const chromePageLabel = getChromePageLabel({
+    connected: Boolean(hybridState?.connected),
+    activeClient: hybridState?.activeClient,
+  });
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <BrandLogo subtitle="SMART STORE OPERATOR" compact />
-          <p className="eyebrow">Wishfigure Smart Store Admin</p>
-          <h1>Seller Desk</h1>
-          <p className="muted">
-            로그인, 상품 선택, 실행 결과를 한 화면에서 바로 이어서 작업합니다.
-          </p>
+    <div className="operator-shell" data-theme={theme}>
+      <header className="operator-header">
+        <div className="operator-brand">
+          <BrandLogo subtitle="SELLER DESK" compact />
+          <VersionPill version={appInfo.version} packaged={appInfo.packaged} />
         </div>
-
-        <nav className="sidebar-nav">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-item ${activeView === item.id ? 'active' : ''}`}
-              onClick={() => setActiveView(item.id)}
-              type="button"
-            >
-              <span>{item.label}</span>
-              <small>{item.description}</small>
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-summary">
-          <div className="summary-row">
-            <span>세션</span>
-            <StatusBadge value={session?.status ?? 'UNKNOWN'} tone="session" />
+        <div className="operator-header-actions">
+          <div className="operator-status-cluster" aria-label="Chrome 연결 상태">
+            <StatusBadge value={connectionLabel} tone="session" />
+            <StatusBadge value={chromePageLabel} tone="session" />
           </div>
-          <div className="summary-row">
-            <span>선택 상품</span>
-            <strong>{selectedProductIds.length}</strong>
-          </div>
-          <div className="summary-row">
-            <span>실행 중</span>
-            <strong>{currentJobId ? '예' : '아니오'}</strong>
-          </div>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => void handleOpenSellerCenter()}
+          >
+            판매자센터 열기
+          </button>
+          <button
+            type="button"
+            className="theme-toggle"
+            aria-pressed={theme === 'dark'}
+            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+          >
+            {theme === 'dark' ? '라이트 모드' : '다크 모드'}
+          </button>
         </div>
-      </aside>
+      </header>
 
-      <main className="main-area">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Wishfigure Seller Desk</p>
-            <h2>{getViewTitle(activeView)}</h2>
-          </div>
-          <div className="topbar-actions">
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => setLogsOpen((current) => !current)}
-            >
-              {logsOpen ? '로그 닫기' : '로그 보기'}
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => void handleValidateSession()}
-            >
-              세션 확인
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => void handlePrepareSession()}
-            >
-              로그인 창 열기
-            </button>
-          </div>
-        </header>
+      <nav className="operator-tabs" aria-label="운영 화면">
+        <button
+          type="button"
+          className={activeTab === 'work' ? 'active' : ''}
+          aria-current={activeTab === 'work' ? 'page' : undefined}
+          onClick={() => setActiveTab('work')}
+        >
+          <span>작업</span>
+          <small>{selectedProductIds.length}건 선택</small>
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'logs' ? 'active' : ''}
+          aria-current={activeTab === 'logs' ? 'page' : undefined}
+          onClick={() => setActiveTab('logs')}
+        >
+          <span>로그</span>
+          <small>{operatorLogs.length}개</small>
+        </button>
+      </nav>
 
-        {notice ? (
-          <div className={`notice notice-${notice.tone}`}>
-            <span>{notice.text}</span>
-            <button type="button" onClick={() => setNotice(null)}>
-              닫기
-            </button>
-          </div>
-        ) : null}
-
-        <div className={`content-grid ${logsOpen ? 'logs-open' : ''}`}>
-          <section className="page-panel">{renderActiveView()}</section>
-          {logsOpen ? (
-            <aside className="log-panel">
-              <div className="panel-header">
-                <div>
-                  <h3>실시간 로그</h3>
-                  <p className="muted">
-                    세션 상태, 진행 이벤트, main process 로그를 최신순으로 표시합니다.
-                  </p>
-                </div>
-              </div>
-              <div className="log-list">
-                {logs.length === 0 ? (
-                  <EmptyState
-                    title="아직 로그가 없습니다"
-                    description="로그인 준비나 상품 조회를 시작하면 이벤트가 여기에 나타납니다."
-                  />
-                ) : (
-                  logs.map((event, index) => (
-                    <div
-                      key={`${event.type}-${event.createdAt}-${index}`}
-                      className="log-entry"
-                    >
-                      <div className="log-entry-top">
-                        <StatusBadge value={event.type} tone="event" />
-                        <span className="muted">{event.createdAt}</span>
-                      </div>
-                      <p>{describeRunEvent(event)}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </aside>
-          ) : null}
-        </div>
-      </main>
-    </div>
-  );
-
-  function renderActiveView() {
-    switch (activeView) {
-      case 'dashboard':
-        return renderDashboardView();
-      case 'session':
-        return renderSessionView();
-      case 'products':
-        return renderProductsView();
-      case 'batch':
-        return renderBatchView();
-      case 'results':
-        return renderResultsView();
-      case 'retry':
-        return renderRetryView();
-      case 'settings':
-        return renderSettingsView();
-    }
-  }
-
-  function renderDashboardView() {
-    return (
-      <div className="stack">
-        <section className="hero-card">
-          <div className="hero-copy">
-            <p className="eyebrow">빠른 시작</p>
-            <h3>로그인하고, 상품을 고르고, 실행하면 끝입니다.</h3>
-            <p className="muted">
-              자주 쓰는 세 단계만 앞에 두고, 나머지 고급 기능은 뒤로 숨겼습니다.
-            </p>
-          </div>
-          <div className="button-row wrap">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => setActiveView('session')}
-            >
-              로그인 세션 준비
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setActiveView('products')}
-            >
-              상품 불러오기
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setActiveView('batch')}
-            >
-              실행 화면으로
-            </button>
-          </div>
-        </section>
-        <div className="stats-grid">
-          <StatCard
-            label="세션 상태"
-            value={session?.status ?? 'UNKNOWN'}
-            subtext={session?.storageStatePath ?? '세션 경로 미설정'}
-          />
-          <StatCard label="선택 상품 수" value={String(selectedProductIds.length)} />
-          <StatCard
-            label="최근 실행"
-            value={activeRun?.status ?? '없음'}
-            subtext={activeRun?.finishedAt ?? '아직 기록이 없습니다'}
-          />
-          <StatCard
-            label="실행 중 Job"
-            value={currentJobId ?? '없음'}
-            subtext={currentProgress ? `${currentProgressPercent}% 진행` : '대기 중'}
-          />
-        </div>
-        <div className="dashboard-grid">
-          <section className="card">
-            <div className="panel-header">
-              <div>
-                <h3>지금 필요한 작업</h3>
-                <p className="muted">현재 상태에 맞는 다음 단계를 바로 실행할 수 있습니다.</p>
-              </div>
+      {activeTab === 'work' ? (
+        <main className="operator-main">
+          <section className="operator-workbench">
+            <div className="operator-title-row">
+            <div>
+              <p className="eyebrow">예약구매 설정 작업</p>
+              <h1>예약상품으로 설정</h1>
+              <p className="muted">
+                현재 페이지의 묶음배송 검색 결과만 불러와 선택한 상품에 적용합니다.
+              </p>
             </div>
-            <div className="button-row wrap">
-              <button type="button" className="primary-button" onClick={() => setActiveView('session')}>
-                로그인 세션 준비
+            <button
+              type="button"
+              className="primary-button load-button"
+              disabled={isBusy}
+              onClick={() => void handleLoadProducts()}
+            >
+              {pendingCommand === 'collect-targets'
+                ? '불러오는 중...'
+                : products.length > 0
+                  ? '현재 페이지 다시 불러오기'
+                  : '현재 페이지 상품 불러오기'}
+            </button>
+          </div>
+
+          <section className="next-step-strip" aria-live="polite">
+            <span>다음 할 일</span>
+            <strong>{nextStepText}</strong>
+          </section>
+
+          {notice ? (
+            <div className={`notice notice-${notice.tone}`}>
+              <span>{notice.text}</span>
+              <button type="button" onClick={() => setNotice(null)}>
+                닫기
               </button>
-              <button type="button" className="secondary-button" onClick={() => setActiveView('products')}>
-                상품 목록 불러오기
-              </button>
-              <button type="button" className="secondary-button" onClick={() => setActiveView('batch')}>
-                배치 실행 화면으로
-              </button>
+            </div>
+          ) : null}
+
+          <section className={progressNoteClassName} aria-busy={isIndeterminateProgress} aria-live="polite">
+            <div>
+              <span className="progress-note-label">{progressLabelText}</span>
+              <strong>{progressTitleText}</strong>
+              <p className="muted">{progressDetailText}</p>
+            </div>
+            <div
+              className="progress-note-bar"
+              aria-label={isIndeterminateProgress ? `${progressLabelText} 진행률` : '작업 진행률'}
+            >
+              <span style={{ width: progressBarWidth }} />
             </div>
           </section>
-          <section className="card">
-            <div className="panel-header">
-              <div>
-                <h3>최근 실행 이력</h3>
-                <p className="muted">최근 12건까지 표시합니다.</p>
+
+          <section className="operator-summary-grid">
+            <div className="summary-tile">
+              <span>불러온 상품</span>
+              <strong>{products.length}건</strong>
+            </div>
+            <div className="summary-tile">
+              <span>설정 대상</span>
+              <strong>{selectedProductIds.length}건</strong>
+            </div>
+          </section>
+
+          <section className="operator-actions">
+            <input
+              className="product-filter"
+              value={productFilter}
+              placeholder="상품번호나 상품명 검색"
+              onChange={(event) => setProductFilter(event.target.value)}
+            />
+            <div className="operator-button-group">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={products.length === 0}
+                onClick={toggleAllProducts}
+              >
+                {allProductsSelected ? '전체 해제' : '전체 선택'}
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={isBusy || selectedProductIds.length === 0 || !hasProductListTab}
+                onClick={() => void handleRunSelected()}
+              >
+                예약상품으로 설정
+              </button>
+              {activeProgress?.phase === 'executing' || pendingCommand === 'start-batch' ? (
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={isCommandBusy}
+                  onClick={() => void sendHybridCommand('stop-batch')}
+                >
+                  {pendingCommand === 'stop-batch' ? '중단 중...' : '중단'}
+                </button>
+              ) : null}
+            </div>
+            <p className="selection-hint">
+              {products.length === 0
+                ? '상품을 불러오면 기본으로 전체 선택됩니다.'
+                : selectedProductIds.length > 0
+                  ? `${selectedProductIds.length}건이 선택되어 있습니다. 제외할 상품은 체크를 해제하세요.`
+                  : '선택된 상품이 없습니다.'}
+            </p>
+          </section>
+
+          <section className="product-list-card">
+            {products.length === 0 ? (
+              <EmptyState
+                title="상품을 불러오세요"
+                description="상품 조회/수정 화면에서 묶음배송 검색 후 현재 페이지 상품 불러오기를 누르세요."
+              />
+            ) : (
+              <div className="simple-table-wrap">
+                <table className="simple-product-table">
+                  <thead>
+                    <tr>
+                      <th>선택</th>
+                      <th>상품번호</th>
+                      <th>상품명</th>
+                      <th>상태</th>
+                      <th>메시지</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredProducts.map((product) => {
+                      const result = resultByProductId.get(product.productId);
+                      return (
+                        <tr key={product.productId}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selectedSet.has(product.productId)}
+                              onChange={() => toggleProduct(product.productId)}
+                            />
+                          </td>
+                          <td>
+                            <strong>{product.productId}</strong>
+                          </td>
+                          <td>{product.name ?? '-'}</td>
+                          <td>
+                            <StatusBadge
+                              value={result ? toStateLabel(result.state) : '대기'}
+                              tone="neutral"
+                            />
+                          </td>
+                          <td>{result ? toOperatorMessage(result.message) : '-'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <button type="button" className="ghost-button" onClick={() => void refreshRecentRuns()}>
+            )}
+          </section>
+        </section>
+
+        <aside className="operator-side-panel">
+          <section className="side-card">
+            <details className="side-details">
+              <summary>사용 순서</summary>
+              <ol className="simple-step-list">
+                <li>묶음배송 검색 결과를 엽니다.</li>
+                <li>현재 페이지 상품을 불러옵니다.</li>
+                <li>제외할 상품 체크를 풉니다.</li>
+                <li>예약상품으로 설정합니다.</li>
+                <li>다음 페이지는 자동으로 확인합니다.</li>
+              </ol>
+            </details>
+          </section>
+
+          <section className="side-card">
+            <details className="settings-details">
+              <summary>상세설정</summary>
+              <div className="required-option-editor">
+                <div className="required-option-header">
+                  <span>필수 옵션</span>
+                  <button
+                    type="button"
+                    className="secondary-button small-button"
+                    disabled={preorderRequiredOptions.length >= 20}
+                    onClick={addRequiredOption}
+                  >
+                    추가
+                  </button>
+                </div>
+                <div className="required-option-list">
+                  {preorderRequiredOptions.map((option, index) => (
+                    <div className="required-option-row" key={`${index}-${option.name}`}>
+                      <label>
+                        <span>옵션명</span>
+                        <input
+                          value={option.name}
+                          onChange={(event) =>
+                            updateRequiredOption(index, 'name', event.target.value)
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>옵션값</span>
+                        <input
+                          value={option.value}
+                          onChange={(event) =>
+                            updateRequiredOption(index, 'value', event.target.value)
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="ghost-button small-button"
+                        disabled={preorderRequiredOptions.length <= 1}
+                        onClick={() => removeRequiredOption(index)}
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className={hasInvalidRequiredOption ? 'settings-warning' : 'muted'}>
+                  {hasInvalidRequiredOption
+                    ? '빈 옵션명이나 옵션값이 있습니다.'
+                    : `현재 ${preorderRequiredOptions.length}개: ${requiredOptionsSummary}`}
+                </p>
+                <div className="button-row tight wrap">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={savingSettings || hasInvalidRequiredOption || !settingsDirty}
+                    onClick={() => void handleSaveSettings()}
+                  >
+                    {savingSettings ? '저장 중...' : settingsDirty ? '설정 저장' : '저장됨'}
+                  </button>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          {!hybridState?.connected ? (
+            <section className="side-card compact-side-card">
+              <h2>연결되지 않을 때</h2>
+              <p className="muted">
+                설치 후에도 연결되지 않으면 상품 조회/수정 탭을 Ctrl+R로 새로고침하세요.
+              </p>
+              <div className="side-button-stack">
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void handleExtensionSetupHelper()}
+                >
+                  확장 설치/업데이트
+                </button>
+              </div>
+            </section>
+          ) : null}
+        </aside>
+      </main>
+      ) : (
+        <main className="operator-main operator-main-single">
+          <section className="operator-workbench log-workbench">
+            <div className="operator-title-row">
+              <div>
+                <p className="eyebrow">운영 로그</p>
+                <h1>로그</h1>
+                <p className="muted">
+                  앱 이벤트와 Chrome 확장 진행 로그를 최신순으로 모아 확인합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void refreshHybridState()}
+              >
                 새로고침
               </button>
             </div>
-            <RecentRunsTable
-              runs={recentRuns}
-              selectedRunId={selectedRunId}
-              onSelect={(jobId) => {
-                setSelectedRunId(jobId);
-                void loadRunDetail(jobId);
-                setActiveView('results');
-              }}
-            />
+
+            <section className="operator-summary-grid log-summary-grid">
+              <div className="summary-tile">
+                <span>전체 로그</span>
+                <strong>{operatorLogs.length}개</strong>
+              </div>
+              <div className="summary-tile">
+                <span>오류</span>
+                <strong>{logErrorCount}개</strong>
+              </div>
+              <div className="summary-tile">
+                <span>확장 로그</span>
+                <strong>{progressLogCount}개</strong>
+              </div>
+              <div className="summary-tile">
+                <span>최근 기록</span>
+                <strong>{latestLogAt ? formatDateTime(latestLogAt) : '-'}</strong>
+              </div>
+            </section>
+
+            <section className="log-list-card">
+              {operatorLogs.length === 0 ? (
+                <EmptyState
+                  title="아직 로그가 없습니다"
+                  description="상품을 불러오거나 작업을 시작하면 앱/확장 로그가 여기에 쌓입니다."
+                />
+              ) : (
+                <div className="operator-log-list" aria-live="polite">
+                  {operatorLogs.map((entry) => (
+                    <article
+                      className={`operator-log-entry tone-${entry.tone}`}
+                      key={entry.id}
+                    >
+                      <div className="operator-log-entry-top">
+                        <div>
+                          <span className="operator-log-source">{entry.source}</span>
+                          <strong>{entry.level}</strong>
+                        </div>
+                        <time dateTime={entry.createdAt}>{formatDateTime(entry.createdAt)}</time>
+                      </div>
+                      <p>{entry.message}</p>
+                      {entry.context && Object.keys(entry.context).length > 0 ? (
+                        <dl className="operator-log-context">
+                          {Object.entries(entry.context).map(([key, value]) => (
+                            <div key={key}>
+                              <dt>{key}</dt>
+                              <dd>{value === null ? '-' : String(value)}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          </section>
+        </main>
+      )}
+      {showBlockingProgress ? (
+        <div className="blocking-progress-overlay" role="presentation">
+          <section
+            className="blocking-progress-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="blocking-progress-title"
+            aria-describedby="blocking-progress-detail"
+          >
+            <span className="blocking-progress-label">{modalProgressLabel}</span>
+            <h2 id="blocking-progress-title">{modalProgressTitle}</h2>
+            <p id="blocking-progress-detail">{modalProgressDetail}</p>
+            <div
+              className={`blocking-progress-bar${modalProgressIsIndeterminate ? ' is-indeterminate' : ''}`}
+              aria-label={`${modalProgressLabel} 진행률`}
+            >
+              <span style={{ width: modalProgressBarWidth }} />
+            </div>
+            <div className="blocking-progress-actions">
+              {isCollectingProducts ? (
+                <button type="button" className="danger-button" onClick={handleCancelLoadProducts}>
+                  불러오기 중지
+                </button>
+              ) : isExecutingBatch || isStoppingBatch ? (
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={isStoppingBatch}
+                  onClick={() => void sendHybridCommand('stop-batch')}
+                >
+                  {isStoppingBatch ? '중단 중...' : '중단'}
+                </button>
+              ) : null}
+            </div>
           </section>
         </div>
-      </div>
-    );
-  }
-
-  function renderSessionView() {
-    return (
-      <div className="stack">
-        <section className="card">
-          <div className="panel-header">
-            <div>
-              <h3>로그인 세션 준비</h3>
-              <p className="muted">
-                앱은 ID/PW를 저장하거나 자동 입력하지 않습니다. 브라우저를 열어 직접 로그인하고,
-                로그인 완료가 감지되면 storageState를 저장한 뒤 창을 자동으로 정리합니다.
-              </p>
-            </div>
-          </div>
-          <div className="details-grid">
-            <DetailPair label="storageState 경로" value={currentSettings.storageStatePath} />
-            <DetailPair label="로그인 방식" value={currentSettings.loginMode} />
-            <DetailPair label="상품 목록 URL" value={currentSettings.productsUrl} />
-            <DetailPair label="현재 세션 상태" value={session?.status ?? 'UNKNOWN'} />
-          </div>
-          <div className="button-row">
-            <button type="button" className="primary-button" disabled={sessionBusy} onClick={() => void handlePrepareSession()}>
-              {sessionBusy ? '로그인 창 확인 중...' : '로그인 준비 시작'}
-            </button>
-            <button type="button" className="secondary-button" disabled={sessionBusy} onClick={() => void handleValidateSession()}>
-              세션 확인
-            </button>
-            <button type="button" className="ghost-button" onClick={() => void handleOpenPath(currentSettings.storageStatePath)}>
-              세션 파일 열기
-            </button>
-          </div>
-          <ol className="step-list">
-            <li>버튼을 누르면 브라우저가 열립니다.</li>
-            <li>네이버와 스마트스토어에 직접 로그인합니다.</li>
-            <li>상품 목록 화면이 보이면 창을 직접 닫지 말고 자동 저장을 기다립니다.</li>
-          </ol>
-        </section>
-      </div>
-    );
-  }
-
-  function renderProductsView() {
-    return (
-      <div className="stack">
-        <section className="card">
-          <div className="panel-header">
-            <div>
-              <h3>상품 조회</h3>
-              <p className="muted">검색어, 직접 입력한 상품번호, 상태 필터로 Smart Store 상품을 불러옵니다.</p>
-            </div>
-          </div>
-          <div className="form-grid">
-            <label className="field">
-              <span>검색어</span>
-              <input value={productSearchText} onChange={(event) => setProductSearchText(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>최대 조회 수</span>
-              <input value={productLimit} onChange={(event) => setProductLimit(event.target.value)} inputMode="numeric" />
-            </label>
-          </div>
-          <label className="field">
-            <span>직접 조회할 상품번호</span>
-            <textarea rows={5} value={productIdsText} onChange={(event) => setProductIdsText(event.target.value)} />
-          </label>
-          <div className="status-filter-row">
-            {PRODUCT_STATUS_OPTIONS.map((status) => (
-              <label key={status} className="checkbox-pill">
-                <input type="checkbox" checked={productStatusFilters.includes(status)} onChange={() => toggleStatusFilter(status)} />
-                <span>{status}</span>
-              </label>
-            ))}
-          </div>
-          <div className="button-row wrap">
-            <button type="button" className="primary-button" disabled={productsBusy} onClick={() => void handleLoadProducts()}>
-              {productsBusy ? '조회 중...' : '상품 불러오기'}
-            </button>
-            <button type="button" className="secondary-button" onClick={toggleSelectAllProducts}>
-              현재 목록 전체 선택/해제
-            </button>
-            <button type="button" className="ghost-button" onClick={() => setSelectedProductIds([])}>
-              선택 초기화
-            </button>
-          </div>
-        </section>
-        <section className="card">
-          <ProductTable
-            products={products}
-            selectedProductIds={selectedProductIds}
-            onToggle={toggleProductSelection}
-          />
-        </section>
-      </div>
-    );
-  }
-
-  function renderBatchView() {
-    return (
-      <div className="stack">
-        <section className="card">
-          <div className="panel-header">
-            <div>
-              <h3>배치 실행</h3>
-              <p className="muted">선택된 상품을 대상으로 예약상품 → 일반상품 전환을 실행합니다.</p>
-            </div>
-          </div>
-          <div className="form-grid">
-            <label className="field checkbox-field">
-              <span>dry-run</span>
-              <input type="checkbox" checked={batchDryRun} onChange={(event) => setBatchDryRun(event.target.checked)} />
-            </label>
-            <label className="field">
-              <span>실행 메모 / 요청자</span>
-              <input value={batchRequestedBy} onChange={(event) => setBatchRequestedBy(event.target.value)} />
-            </label>
-          </div>
-          <div className="details-grid">
-            <DetailPair label="선택 상품 수" value={`${selectedProductIds.length}건`} />
-            <DetailPair label="딜레이" value={`${currentSettings.delayMs} ms`} />
-            <DetailPair label="동시성" value={String(currentSettings.concurrency)} />
-            <DetailPair label="연속 실패 제한" value={String(currentSettings.consecutiveFailureLimit)} />
-          </div>
-          {currentProgress ? (
-            <div className="progress-card">
-              <div className="progress-card-top">
-                <strong>{currentProgress.jobId}</strong>
-                <span>{currentProgressPercent}%</span>
-              </div>
-              <div className="progress-bar">
-                <div className="progress-bar-fill" style={{ width: `${currentProgressPercent}%` }} />
-              </div>
-              <p className="muted">
-                처리 {currentProgress.processedItems}/{currentProgress.totalItems} · 성공 {currentProgress.successCount} · 잠금 {currentProgress.lockedCount} · 실패 {currentProgress.failedCount}
-              </p>
-            </div>
-          ) : null}
-          <div className="button-row wrap">
-            <button type="button" className="primary-button" disabled={batchBusy || runningBatch} onClick={() => void handleExecuteBatch()}>
-              {batchBusy ? '실행 중...' : batchDryRun ? 'dry-run 실행' : '실제 변경 실행'}
-            </button>
-            <button type="button" className="secondary-button" disabled={batchBusy || runningBatch} onClick={() => void handleResumeBatch()}>
-              체크포인트 이어 실행
-            </button>
-            <button type="button" className="danger-button" disabled={!currentJobId} onClick={() => void handleStopBatch()}>
-              실행 중지
-            </button>
-          </div>
-        </section>
-      </div>
-    );
-  }
-
-  function renderResultsView() {
-    return (
-      <div className="stack">
-        <section className="card">
-          <div className="panel-header">
-            <div>
-              <h3>실행 결과</h3>
-              <p className="muted">최근 실행 결과를 요약하고 실패 아티팩트를 열 수 있습니다.</p>
-            </div>
-            <div className="button-row wrap">
-              <select value={selectedRunId} onChange={(event) => {
-                setSelectedRunId(event.target.value);
-                void loadRunDetail(event.target.value);
-              }}>
-                {recentRuns.map((run) => (
-                  <option key={run.jobId} value={run.jobId}>
-                    {run.jobId} · {run.status}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="ghost-button" onClick={() => void handleExportRunReport()}>
-                리포트 내보내기
-              </button>
-            </div>
-          </div>
-          {runDetail?.result ? (
-            <>
-              <div className="stats-grid compact">
-                <StatCard label="상태" value={runDetail.result.status} />
-                <StatCard label="성공" value={String(runDetail.result.summary.successCount)} />
-                <StatCard label="잠금" value={String(runDetail.result.summary.lockedCount)} />
-                <StatCard label="실패" value={String(runDetail.result.summary.failedCount)} />
-              </div>
-              <div className="form-grid">
-                <label className="field">
-                  <span>결과 검색</span>
-                  <input value={resultSearchText} onChange={(event) => setResultSearchText(event.target.value)} />
-                </label>
-                <label className="field">
-                  <span>결과 그룹</span>
-                  <select value={resultBucketFilter} onChange={(event) => setResultBucketFilter(event.target.value as ResultBucketFilter)}>
-                    <option value="all">전체</option>
-                    <option value="success">success</option>
-                    <option value="locked">locked</option>
-                    <option value="failed">failed</option>
-                  </select>
-                </label>
-              </div>
-              <ResultItemsTable items={filteredResultItems} onOpenPath={(targetPath) => void handleOpenPath(targetPath)} />
-            </>
-          ) : detailBusy ? (
-            <EmptyState title="실행 상세를 불러오는 중입니다" description="잠시만 기다려 주세요." />
-          ) : (
-            <EmptyState title="표시할 실행 결과가 없습니다" description="배치를 먼저 실행하세요." />
-          )}
-        </section>
-      </div>
-    );
-  }
-
-  function renderRetryView() {
-    return (
-      <div className="stack">
-        <section className="card">
-          <div className="panel-header">
-            <div>
-              <h3>실패 항목 재시도</h3>
-              <p className="muted">기존 실행 이력에서 실패한 항목만 골라 새 배치로 재실행합니다.</p>
-            </div>
-          </div>
-          <div className="form-grid">
-            <label className="field">
-              <span>대상 실행 이력</span>
-              <select value={selectedRunId} onChange={(event) => {
-                setSelectedRunId(event.target.value);
-                void loadRunDetail(event.target.value);
-              }}>
-                {recentRuns.map((run) => (
-                  <option key={run.jobId} value={run.jobId}>
-                    {run.jobId} · 실패 {run.summary.failedCount}건
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>요청자 메모</span>
-              <input value={retryRequestedBy} onChange={(event) => setRetryRequestedBy(event.target.value)} />
-            </label>
-          </div>
-          <div className="button-row wrap">
-            <label className="checkbox-pill">
-              <input type="checkbox" checked={retryDryRun} onChange={(event) => setRetryDryRun(event.target.checked)} />
-              <span>dry-run 재시도</span>
-            </label>
-            <label className="checkbox-pill">
-              <input type="checkbox" checked={retryIncludeAllFailed} onChange={(event) => setRetryIncludeAllFailed(event.target.checked)} />
-              <span>모든 failed 포함</span>
-            </label>
-            <button type="button" className="primary-button" disabled={batchBusy} onClick={() => void handleRetryFailedItems()}>
-              실패 항목 재시도
-            </button>
-          </div>
-        </section>
-        <section className="card">
-          <ResultItemsTable
-            items={(runDetail?.itemResults ?? []).filter((item) => item.outputBucket === 'failed')}
-            onOpenPath={(targetPath) => void handleOpenPath(targetPath)}
-          />
-        </section>
-      </div>
-    );
-  }
-
-  function renderSettingsView() {
-    return (
-      <div className="stack">
-        <section className="card">
-          <div className="panel-header">
-            <div>
-              <h3>설정</h3>
-              <p className="muted">실행 속도, 세션 경로, 셀렉터 override, 출력 경로를 조정합니다.</p>
-            </div>
-          </div>
-          <div className="form-grid">
-            <label className="field wide">
-              <span>상품 목록 URL</span>
-              <input value={currentSettingsDraft.productsUrl} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, productsUrl: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>로그인 방식</span>
-              <select value={currentSettingsDraft.loginMode} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, loginMode: event.target.value as AppSettings['loginMode'] })}>
-                <option value="storageState">storageState</option>
-                <option value="persistent">persistent</option>
-              </select>
-            </label>
-            <label className="field wide">
-              <span>storageState 경로</span>
-              <input value={currentSettingsDraft.storageStatePath} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, storageStatePath: event.target.value })} />
-            </label>
-            <label className="field wide">
-              <span>persistent userDataDir</span>
-              <input value={currentSettingsDraft.userDataDir ?? ''} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, userDataDir: event.target.value })} />
-            </label>
-            <label className="field wide">
-              <span>output 디렉터리</span>
-              <input value={currentSettingsDraft.outputDir} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, outputDir: event.target.value })} />
-            </label>
-            <label className="field">
-              <span>delayMs</span>
-              <input value={String(currentSettingsDraft.delayMs)} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, delayMs: Number(event.target.value || '0') })} inputMode="numeric" />
-            </label>
-            <label className="field">
-              <span>concurrency</span>
-              <input value={String(currentSettingsDraft.concurrency)} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, concurrency: Number(event.target.value || '1') })} inputMode="numeric" />
-            </label>
-            <label className="field">
-              <span>연속 실패 제한</span>
-              <input value={String(currentSettingsDraft.consecutiveFailureLimit)} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, consecutiveFailureLimit: Number(event.target.value || '1') })} inputMode="numeric" />
-            </label>
-            <label className="field">
-              <span>selector profile id</span>
-              <input value={currentSettingsDraft.selectorProfileId} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, selectorProfileId: event.target.value })} />
-            </label>
-            <label className="field wide">
-              <span>selector override 파일</span>
-              <input value={currentSettingsDraft.selectorConfigPath ?? ''} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, selectorConfigPath: event.target.value })} />
-            </label>
-          </div>
-          <div className="button-row wrap">
-            <label className="checkbox-pill">
-              <input type="checkbox" checked={currentSettingsDraft.headless} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, headless: event.target.checked })} />
-              <span>headless</span>
-            </label>
-            <label className="checkbox-pill">
-              <input type="checkbox" checked={currentSettingsDraft.captureScreenshotOnFailure} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, captureScreenshotOnFailure: event.target.checked })} />
-              <span>실패 스크린샷</span>
-            </label>
-            <label className="checkbox-pill">
-              <input type="checkbox" checked={currentSettingsDraft.captureHtmlOnFailure} onChange={(event) => setSettingsDraft({ ...currentSettingsDraft, captureHtmlOnFailure: event.target.checked })} />
-              <span>실패 HTML</span>
-            </label>
-            <button type="button" className="primary-button" disabled={settingsBusy} onClick={() => void handleSaveSettings()}>
-              {settingsBusy ? '저장 중...' : '설정 저장'}
-            </button>
-          </div>
-        </section>
-      </div>
-    );
-  }
+      ) : null}
+    </div>
+  );
 }
 
-function getViewTitle(view: ViewId): string {
-  const item = NAV_ITEMS.find((navItem) => navItem.id === view);
-  return item?.label ?? 'Smart Store Desktop Operator';
-}
+function toRunEventLogEntry(event: RunEvent, index: number): OperatorLogEntry {
+  if (event.type === 'log') {
+    return {
+      id: `event-${event.createdAt}-${index}`,
+      source: '앱',
+      level: toLogLevelLabel(event.level),
+      tone: toLogTone(event.level),
+      createdAt: event.createdAt,
+      message: toOperatorMessage(event.message),
+      context: event.context,
+    };
+  }
 
-function sanitizeSettings(settings: AppSettings): AppSettings {
-  const clean = (value?: string) =>
-    value && value.trim().length > 0 ? value : undefined;
+  if (event.type === 'job-progress') {
+    return {
+      id: `event-${event.createdAt}-${event.jobId}-${index}`,
+      source: '작업',
+      level: '진행',
+      tone: 'info',
+      createdAt: event.createdAt,
+      message: describeRunEvent(event),
+      context: {
+        jobId: event.jobId,
+        totalItems: event.totalItems,
+        processedItems: event.processedItems,
+      },
+    };
+  }
+
+  if (event.type === 'job-state') {
+    return {
+      id: `event-${event.createdAt}-${event.jobId}-${index}`,
+      source: '작업',
+      level: toBatchStatusLabel(event.status),
+      tone: toLogTone(event.status),
+      createdAt: event.createdAt,
+      message: describeRunEvent(event),
+      context: {
+        jobId: event.jobId,
+      },
+    };
+  }
 
   return {
-    ...settings,
-    userDataDir: clean(settings.userDataDir),
-    selectorConfigPath: clean(settings.selectorConfigPath),
+    id: `event-${event.createdAt}-session-${index}`,
+    source: '세션',
+    level: getSessionLabel(event.status),
+    tone: toLogTone(event.status),
+    createdAt: event.createdAt,
+    message: `${getSessionLabel(event.status)} · ${toOperatorMessage(event.message)}`,
   };
+}
+
+function toLogLevelLabel(level: string): string {
+  switch (level.toLowerCase()) {
+    case 'debug':
+      return '디버그';
+    case 'info':
+      return '정보';
+    case 'warn':
+    case 'warning':
+      return '경고';
+    case 'error':
+      return '오류';
+    default:
+      return level;
+  }
+}
+
+function toBatchStatusLabel(status: string): string {
+  switch (status) {
+    case 'PENDING':
+      return '대기';
+    case 'RUNNING':
+      return '실행 중';
+    case 'STOP_REQUESTED':
+      return '중단 요청';
+    case 'STOPPED':
+      return '중단';
+    case 'COMPLETED':
+    case 'SUCCEEDED':
+      return '완료';
+    case 'FAILED':
+      return '실패';
+    default:
+      return status;
+  }
+}
+
+function toCommandStatusLabel(status: HybridBridgeCommandState['status']): string {
+  switch (status) {
+    case 'QUEUED':
+      return '대기';
+    case 'COMPLETED':
+      return '완료';
+    case 'FAILED':
+      return '실패';
+    default:
+      return status;
+  }
+}
+
+function toLogTone(value: string): OperatorLogTone {
+  const normalized = value.toLowerCase();
+
+  if (
+    normalized.includes('error') ||
+    normalized.includes('fail') ||
+    normalized.includes('invalid') ||
+    normalized.includes('expired') ||
+    normalized.includes('denied')
+  ) {
+    return 'error';
+  }
+
+  if (
+    normalized.includes('warn') ||
+    normalized.includes('stop') ||
+    normalized.includes('challenge') ||
+    normalized.includes('login_required') ||
+    normalized.includes('missing')
+  ) {
+    return 'warn';
+  }
+
+  if (
+    normalized.includes('ready') ||
+    normalized.includes('complete') ||
+    normalized.includes('success') ||
+    normalized.includes('succeed')
+  ) {
+    return 'success';
+  }
+
+  if (normalized.includes('info') || normalized.includes('debug') || normalized.includes('running')) {
+    return 'info';
+  }
+
+  return 'neutral';
+}
+
+function readTimestamp(value: string): number {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getInitialTheme(): ThemeMode {
+  try {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      return savedTheme;
+    }
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+function readProductsFromResponse(response: unknown): LoadedProduct[] {
+  const details = isRecord(response) ? response.details : undefined;
+  if (!isRecord(details)) {
+    return [];
+  }
+
+  const source = Array.isArray(details.products)
+    ? details.products
+    : Array.isArray(details.sample)
+      ? details.sample
+      : [];
+
+  return source
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item) => ({
+      productId: String(item.productId ?? '').trim(),
+      name: readOptionalString(item.name),
+      editUrl: readOptionalString(item.editUrl),
+      channelProductNo: readOptionalString(item.channelProductNo),
+      originProductNo: readOptionalString(item.originProductNo),
+      rowTextPreview: readOptionalString(item.rowTextPreview),
+      sourceVerification: readOptionalString(item.sourceVerification),
+    }))
+    .filter((product) => product.productId.length > 0);
+}
+
+function isProductListBridgeState(state: HybridBridgeState | null): boolean {
+  const activeClient = state?.activeClient;
+  if (!activeClient) {
+    return false;
+  }
+
+  const pageUrl = activeClient.pageUrl.toLowerCase();
+  return (
+    activeClient.pageRole === 'product-list' ||
+    pageUrl.includes('origin-list') ||
+    pageUrl.includes('product-list')
+  );
+}
+
+function toStateLabel(state: string): string {
+  switch (state) {
+    case 'SUCCEEDED':
+      return '완료';
+    case 'FAILED':
+      return '실패';
+    case 'STOPPED':
+      return '중단';
+    case 'SKIPPED':
+      return '건너뜀';
+    case 'LOCKED_BY_ORDER_PERIOD':
+      return '변경 불가';
+    default:
+      return state;
+  }
+}
+
+function toOperatorMessage(message?: string): string {
+  const value = (message ?? '').trim();
+  if (!value) {
+    return '상세 메시지가 없습니다.';
+  }
+
+  if (value.includes('Bundle-delivery filter') || value.includes('묶음배송')) {
+    return '묶음배송 검색 조건이 적용되어 있는지 확인해 주세요. 조건이 없으면 전체 상품을 건드릴 위험이 있어 중단합니다.';
+  }
+
+  if (value.includes('seller center') || value.includes('판매자센터')) {
+    return value.includes('Chrome')
+      ? value
+      : 'Chrome에서 스마트스토어 판매자센터 상품 조회/수정 화면을 열어 주세요.';
+  }
+
+  if (value.includes('Edit URL') || value.includes('수정 화면')) {
+    return '상품 수정 화면으로 들어가는 버튼을 찾지 못했습니다. 화면을 새로고침한 뒤 상품을 다시 불러와 주세요.';
+  }
+
+  if (value.includes('Target page') || value.includes('frame was detached')) {
+    return 'Chrome 탭이 새로고침되거나 이동하면서 연결이 끊겼습니다. 판매자센터 화면을 다시 열고 상품 불러오기를 다시 눌러 주세요.';
+  }
+
+  if (value.includes('verification required')) {
+    return '현재 화면 구조 확인이 더 필요합니다. 판매자센터 화면이 맞는지, 묶음배송 검색이 적용됐는지 확인해 주세요.';
+  }
+
+  return value;
+}
+
+function normalizeRequiredOptionsForUi(
+  options: readonly PreorderRequiredOption[],
+): PreorderRequiredOption[] {
+  return options.length > 0
+    ? options.map((option) => ({ ...option }))
+    : [{ name: '해외 유통구조상 예약캔슬 불가', value: '동의합니다.' }];
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value
+    : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

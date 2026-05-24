@@ -5,32 +5,21 @@ import { ZodError } from 'zod';
 import type { SerializedDesktopError, DesktopInvokeRequest, DesktopInvokeResponse } from '@smart-store/shared';
 import {
   DESKTOP_INVOKE_CHANNEL,
-  parseExecuteBatchInput,
-  parseExportRunReportInput,
-  parseGetRunDetailInput,
-  parseListRecentRunsInput,
-  parseLoadProductsInput,
+  parseCopyTextInput,
+  parseHybridSendCommandInput,
   parseOpenPathInput,
-  parseResumeBatchInput,
-  parseRetryFailedItemsInput,
-  parseStopBatchInput,
+  parseUpdateSettingsInput,
 } from '@smart-store/shared';
 
 type DesktopRuntime = {
   getBootState(): Promise<unknown>;
-  getSettings(): Promise<unknown>;
-  saveSettings(input: unknown): Promise<unknown>;
-  prepareLoginSession(input?: unknown): Promise<unknown>;
-  validateSession(): Promise<unknown>;
-  loadProducts(input?: unknown): Promise<unknown>;
-  executeBatch(input: unknown): Promise<unknown>;
-  resumeBatch(input: unknown): Promise<unknown>;
-  stopBatch(input?: unknown): Promise<unknown>;
-  retryFailedItems(input: unknown): Promise<unknown>;
-  listRecentRuns(input?: unknown): Promise<unknown>;
-  getRunDetail(input: unknown): Promise<unknown>;
-  exportRunReport(input: unknown): Promise<unknown>;
+  saveSettings(settings: unknown): Promise<unknown>;
+  getHybridBridgeState(): Promise<unknown>;
+  sendHybridCommand(input: unknown): Promise<unknown>;
+  openChromeExtensions(): Promise<unknown>;
+  openSellerCenter(): Promise<unknown>;
   openPath(targetPath: string): Promise<unknown>;
+  copyText(text: string): Promise<unknown>;
 };
 
 export function registerDesktopIpc(
@@ -48,32 +37,24 @@ export function registerDesktopIpc(
         switch (request.command) {
           case 'app:getBootState':
             return ok(await runtime.getBootState());
-          case 'settings:get':
-            return ok(await runtime.getSettings());
-          case 'settings:save':
-            return ok(await runtime.saveSettings(request.payload));
-          case 'session:prepare':
-            return ok(await runtime.prepareLoginSession(request.payload));
-          case 'session:validate':
-            return ok(await runtime.validateSession());
-          case 'products:load':
-            return ok(await runtime.loadProducts(parseLoadProductsInput(request.payload)));
-          case 'batch:execute':
-            return ok(await runtime.executeBatch(parseExecuteBatchInput(request.payload)));
-          case 'batch:resume':
-            return ok(await runtime.resumeBatch(parseResumeBatchInput(request.payload)));
-          case 'batch:stop':
-            return ok(await runtime.stopBatch(parseStopBatchInput(request.payload)));
-          case 'batch:retry':
-            return ok(await runtime.retryFailedItems(parseRetryFailedItemsInput(request.payload)));
-          case 'history:listRecent':
-            return ok(await runtime.listRecentRuns(parseListRecentRunsInput(request.payload)));
-          case 'history:getRunDetail':
-            return ok(await runtime.getRunDetail(parseGetRunDetailInput(request.payload)));
-          case 'history:export':
-            return ok(await runtime.exportRunReport(parseExportRunReportInput(request.payload)));
+          case 'app:updateSettings':
+            return ok(
+              await runtime.saveSettings(parseUpdateSettingsInput(request.payload)),
+            );
+          case 'hybrid:getState':
+            return ok(await runtime.getHybridBridgeState());
+          case 'hybrid:sendCommand':
+            return ok(
+              await runtime.sendHybridCommand(parseHybridSendCommandInput(request.payload)),
+            );
+          case 'hybrid:openChromeExtensions':
+            return ok(await runtime.openChromeExtensions());
+          case 'hybrid:openSellerCenter':
+            return ok(await runtime.openSellerCenter());
           case 'system:openPath':
             return ok(await runtime.openPath(parseOpenPathInput(request.payload).targetPath));
+          case 'system:copyText':
+            return ok(await runtime.copyText(parseCopyTextInput(request.payload).text));
           default:
             return fail({
               code: 'UNKNOWN_COMMAND',
