@@ -353,7 +353,7 @@ export function App() {
       await refreshHybridState();
       setNotice({
         tone: 'info',
-        text: 'Chrome에서 판매자센터 상품 조회/수정 화면을 연 뒤, 상품 불러오기를 누르면 됩니다.',
+        text: '전용 Chrome을 열고 그 안에서 직접 로그인한 뒤, 상품 조회/수정 화면에서 상품 불러오기를 누르면 됩니다.',
       });
     } catch (error) {
       showError(error);
@@ -689,8 +689,8 @@ export function App() {
       setNotice({
         tone: 'error',
         text: isCurrentLoginPage
-          ? `${prefix} Chrome에서 로그인을 끝낸 뒤 상품 조회/수정 화면을 열어 주세요.`
-          : `${prefix} Chrome 판매자센터 상품 조회/수정 탭을 열고 Ctrl+R로 새로고침해 주세요.`,
+          ? `${prefix} 전용 Chrome에서 로그인을 끝낸 뒤 상품 조회/수정 화면을 열어 주세요.`
+          : `${prefix} 전용 Chrome의 상품 조회/수정 탭을 열고 Ctrl+R로 새로고침해 주세요.`,
       });
       return false;
     } catch (error) {
@@ -706,7 +706,7 @@ export function App() {
       await window.desktopApi.hybrid.openSellerCenter();
       setNotice({
         tone: 'success',
-        text: 'Chrome에서 판매자센터를 열었습니다. 로그인 후 상품 조회/수정 화면을 확인해 주세요.',
+        text: '전용 Chrome을 열었습니다. 열린 Chrome에서 직접 로그인한 뒤 상품 조회/수정 화면을 확인해 주세요.',
       });
     } catch (error) {
       showError(error);
@@ -733,7 +733,7 @@ export function App() {
       setNotice({
         tone: 'success',
         text:
-          '확장 폴더와 Chrome 확장 관리 화면을 열었습니다. 개발자 모드에서 압축해제된 확장 프로그램 로드를 누르고 열린 폴더를 선택하세요.',
+          '전용 Chrome에서는 확장을 자동 로드합니다. 연결이 안 될 때만 열린 확장 관리 화면에서 압축해제된 확장 프로그램 로드로 폴더를 선택하세요.',
       });
     } catch (error) {
       showError(error);
@@ -799,7 +799,7 @@ export function App() {
             className="secondary-button"
             onClick={() => void handleOpenSellerCenter()}
           >
-            판매자센터 열기
+            전용 Chrome 열기
           </button>
           <button
             type="button"
@@ -997,6 +997,7 @@ export function App() {
             <details className="side-details">
               <summary>사용 순서</summary>
               <ol className="simple-step-list">
+                <li>전용 Chrome에서 로그인합니다.</li>
                 <li>묶음배송 검색 결과를 엽니다.</li>
                 <li>현재 페이지 상품을 불러옵니다.</li>
                 <li>제외할 상품 체크를 풉니다.</li>
@@ -1076,7 +1077,7 @@ export function App() {
             <section className="side-card compact-side-card">
               <h2>연결되지 않을 때</h2>
               <p className="muted">
-                설치 후에도 연결되지 않으면 상품 조회/수정 탭을 Ctrl+R로 새로고침하세요.
+                전용 Chrome은 확장을 자동 로드합니다. 연결되지 않으면 상품 조회/수정 탭을 Ctrl+R로 새로고침하세요.
               </p>
               <div className="side-button-stack">
                 <button
@@ -1084,7 +1085,7 @@ export function App() {
                   className="primary-button"
                   onClick={() => void handleExtensionSetupHelper()}
                 >
-                  확장 설치/업데이트
+                  확장 확인/수동 설치
                 </button>
               </div>
             </section>
@@ -1439,7 +1440,7 @@ function toOperatorMessage(message?: string): string {
   if (value.includes('seller center') || value.includes('판매자센터')) {
     return value.includes('Chrome')
       ? value
-      : 'Chrome에서 스마트스토어 판매자센터 상품 조회/수정 화면을 열어 주세요.';
+      : '전용 Chrome에서 스마트스토어 판매자센터 상품 조회/수정 화면을 열어 주세요.';
   }
 
   if (value.includes('Edit URL') || value.includes('수정 화면')) {

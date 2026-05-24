@@ -16,6 +16,12 @@ const WINDOWS_CHROME_CANDIDATES = [
   ['LOCALAPPDATA', 'Google', 'Chrome SxS', 'Application', 'chrome.exe'],
 ] as const;
 
+export type ChromeLaunchOptions = {
+  newWindow?: boolean;
+  userDataDir?: string;
+  extensionPath?: string;
+};
+
 export async function resolveChromeExecutablePath(): Promise<string | null> {
   for (const candidate of WINDOWS_CHROME_CANDIDATES) {
     const [envKey, ...segments] = candidate;
@@ -46,15 +52,19 @@ export async function resolveChromeExecutablePath(): Promise<string | null> {
 
 export async function openUrlInChrome(
   target: string,
-  options: { newWindow?: boolean } = {},
+  options: ChromeLaunchOptions = {},
 ): Promise<string | null> {
   const chromePath = await resolveChromeExecutablePath();
   if (!chromePath) {
     return null;
   }
 
+  if (options.userDataDir) {
+    fs.mkdirSync(options.userDataDir, { recursive: true });
+  }
+
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(chromePath, buildChromeArgs(target, options), {
+    const child = spawn(chromePath, buildChromeLaunchArgs(target, options), {
       detached: true,
       stdio: 'ignore',
       windowsHide: false,
@@ -70,13 +80,27 @@ export async function openUrlInChrome(
   return chromePath;
 }
 
-function buildChromeArgs(
+export function buildChromeLaunchArgs(
   target: string,
-  options: { newWindow?: boolean },
+  options: ChromeLaunchOptions = {},
 ): string[] {
-  if (target.toLowerCase().startsWith('chrome://')) {
-    return [target];
+  const args: string[] = [
+    '--no-first-run',
+    '--no-default-browser-check',
+  ];
+
+  if (options.userDataDir) {
+    args.push(`--user-data-dir=${path.resolve(options.userDataDir)}`);
   }
 
-  return options.newWindow === false ? [target] : ['--new-window', target];
+  if (options.extensionPath) {
+    args.push(`--load-extension=${path.resolve(options.extensionPath)}`);
+  }
+
+  if (options.newWindow !== false) {
+    args.push('--new-window');
+  }
+
+  args.push(target);
+  return args;
 }

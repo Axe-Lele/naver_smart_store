@@ -1,5 +1,6 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
+import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 
 import { app, BrowserWindow, clipboard, shell } from 'electron';
@@ -30,7 +31,7 @@ import type {
 } from '@smart-store/shared';
 import type { RunEvent } from '@smart-store/application';
 
-import { openUrlInChrome } from './chrome-launcher.js';
+import { type ChromeLaunchOptions, openUrlInChrome } from './chrome-launcher.js';
 import { HybridBridgeServer } from './hybrid-bridge-server.js';
 
 export class DesktopRunEventPublisher implements RunEventPublisherPort {
@@ -64,6 +65,10 @@ export class DesktopRunEventPublisher implements RunEventPublisherPort {
 export class DesktopAppRuntime {
   private readonly dataRoot: string;
 
+  private readonly authDir: string;
+
+  private readonly extensionBuildPath: string;
+
   private readonly storageStateRepository = new FileStorageStateRepository();
 
   private readonly eventPublisher: DesktopRunEventPublisher;
@@ -78,7 +83,7 @@ export class DesktopAppRuntime {
 
   constructor() {
     this.dataRoot = app.isPackaged ? app.getPath('userData') : process.cwd();
-    const authDir = path.join(
+    this.authDir = path.join(
       this.dataRoot,
       app.isPackaged ? 'auth' : '.auth',
     );
@@ -89,7 +94,7 @@ export class DesktopAppRuntime {
     const outputDir = path.join(this.dataRoot, 'output');
     this.lastKnownSession = {
       storageStatePath: path.join(
-        authDir,
+        this.authDir,
         'smartstore-storage-state.json',
       ),
       status: 'UNKNOWN',
@@ -97,11 +102,11 @@ export class DesktopAppRuntime {
     this.eventPublisher = new DesktopRunEventPublisher((event) =>
       this.handleRunEvent(event),
     );
-    const extensionBuildPath = app.isPackaged
+    this.extensionBuildPath = app.isPackaged
       ? path.join(process.resourcesPath, 'chrome-extension')
       : path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
     this.hybridBridgeServer = new HybridBridgeServer({
-      extensionBuildPath,
+      extensionBuildPath: this.extensionBuildPath,
       chromeExtensionsUrl: 'chrome://extensions',
       sellerCenterUrl: DEFAULT_SMARTSTORE_PRODUCTS_URL,
     });
@@ -111,10 +116,10 @@ export class DesktopAppRuntime {
         productsUrl: DEFAULT_SMARTSTORE_PRODUCTS_URL,
         loginMode: 'storageState',
         storageStatePath: path.join(
-          authDir,
+          this.authDir,
           'smartstore-storage-state.json',
         ),
-        userDataDir: path.join(authDir, 'chrome-profile'),
+        userDataDir: path.join(this.authDir, 'chrome-profile'),
         outputDir,
         headless: false,
         delayMs: 1_500,
@@ -184,10 +189,11 @@ export class DesktopAppRuntime {
   }
 
   async openChromeExtensions(): Promise<void> {
+    const settings = await this.orchestrator.settingsStore.loadSettings();
     await this.openChromeTarget(
       'chrome://extensions',
-      'Chrome를 찾지 못해 확장 관리 페이지를 열 수 없습니다. Chrome 설치 경로를 확인해 주세요.',
-      { newWindow: false },
+      '전용 Chrome을 열 Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
+      await this.createDedicatedChromeLaunchOptions(settings, { newWindow: false }),
     );
   }
 
@@ -195,7 +201,8 @@ export class DesktopAppRuntime {
     const settings = await this.orchestrator.settingsStore.loadSettings();
     await this.openChromeTarget(
       settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
-      'Chrome를 찾지 못해 판매자센터를 열 수 없습니다. Chrome 설치 경로를 확인해 주세요.',
+      '전용 Chrome을 열 Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
+      await this.createDedicatedChromeLaunchOptions(settings),
     );
   }
 
@@ -448,17 +455,20 @@ export class DesktopAppRuntime {
   private async openChromeTarget(
     target: string,
     fallbackMessage: string,
-    options: { newWindow?: boolean } = {},
+    options: ChromeLaunchOptions = {},
   ): Promise<void> {
     const chromePath = await openUrlInChrome(target, options);
     if (chromePath) {
       await this.publishLog(
         'info',
-        'Opened target URL in local Chrome.',
+        'Opened dedicated Chrome workspace.',
         undefined,
         {
           chromePath,
           target,
+          userDataDir: options.userDataDir ?? null,
+          extensionPath: options.extensionPath ?? null,
+          extensionLoaded: Boolean(options.extensionPath),
         },
       );
       return;
@@ -480,6 +490,37 @@ export class DesktopAppRuntime {
         `${fallbackMessage}${error instanceof Error ? `\n\n${error.message}` : ''}`,
       );
     }
+  }
+
+  private async createDedicatedChromeLaunchOptions(
+    settings: AppSettings,
+    options: Pick<ChromeLaunchOptions, 'newWindow'> = {},
+  ): Promise<ChromeLaunchOptions> {
+    const userDataDir =
+      settings.userDataDir?.trim() || path.join(this.authDir, 'chrome-profile');
+    const extensionPath = this.getBundledExtensionPath();
+
+    if (!extensionPath) {
+      await this.publishLog(
+        'warn',
+        'Bundled Chrome extension was not found. Dedicated Chrome will open without auto-loading the bridge extension.',
+        undefined,
+        {
+          extensionBuildPath: this.extensionBuildPath,
+        },
+      );
+    }
+
+    return {
+      ...options,
+      userDataDir,
+      extensionPath,
+    };
+  }
+
+  private getBundledExtensionPath(): string | undefined {
+    const manifestPath = path.join(this.extensionBuildPath, 'manifest.json');
+    return fs.existsSync(manifestPath) ? this.extensionBuildPath : undefined;
   }
 
   private handleRunEvent(event: RunEvent): void {
