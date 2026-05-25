@@ -18,7 +18,7 @@ import type {
 
 const DEFAULT_BRIDGE_HOST = '127.0.0.1';
 const DEFAULT_BRIDGE_PORT = 45873;
-const CLIENT_STALE_MS = 20_000;
+const CLIENT_STALE_MS = 6_000;
 const CLAIM_STALE_MS = 30_000;
 const DEFAULT_COMMAND_STALE_MS = 90_000;
 const STOP_COMMAND_STALE_MS = 3_000;
@@ -404,9 +404,11 @@ export class HybridBridgeServer {
         (staleClientIds.has(command.targetClientId) ||
           !connectedClientIds.has(command.targetClientId))
       ) {
-        command.targetClientId = undefined;
+        command.status = 'FAILED';
+        command.respondedAt = new Date(now).toISOString();
         command.claimedByClientId = undefined;
         command.claimedAt = undefined;
+        command.message = getCommandDisconnectedMessage(command.type);
       }
     }
   }
@@ -496,6 +498,18 @@ function getCommandTimeoutMessage(type: HybridCommandType): string {
   }
 
   return 'Chrome 탭이 요청에 응답하지 않았습니다. 판매자센터 상품 목록 탭을 새로고침한 뒤 다시 실행해 주세요.';
+}
+
+function getCommandDisconnectedMessage(type: HybridCommandType): string {
+  if (type === 'collect-targets') {
+    return '상품 불러오기를 취소했습니다. Chrome 확장 연결이 끊겼습니다. 판매자센터 상품 조회/수정 탭을 새로고침한 뒤 다시 불러와 주세요.';
+  }
+
+  if (type === 'stop-batch') {
+    return '중단 요청을 취소했습니다. Chrome 확장 연결이 끊겼습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.';
+  }
+
+  return '요청을 취소했습니다. Chrome 확장 연결이 끊겼습니다. 판매자센터 탭을 새로고침한 뒤 다시 실행해 주세요.';
 }
 
 function describeHybridCommand(type: HybridCommandType): string {

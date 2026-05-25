@@ -137,6 +137,46 @@ describe('HybridBridgeServer', () => {
     });
     expect(expiredState.lastCommand?.message).toContain('3초');
   });
+
+  it('fails a product load command when its Chrome extension client disconnects', async () => {
+    server = new HybridBridgeServer({
+      extensionBuildPath: process.cwd(),
+      chromeExtensionsUrl: 'chrome://extensions',
+      sellerCenterUrl,
+      port: 0,
+    });
+    await server.start();
+
+    const serverUrl = server.getState().serverUrl;
+    await postHeartbeat(serverUrl, {
+      clientId: 'product-list-tab',
+      pageUrl: sellerCenterUrl,
+      pageTitle: '상품 조회/수정',
+      visibilityState: 'visible',
+      hasFocus: true,
+    });
+
+    const queued = server.enqueueCommand('collect-targets');
+    await expect(pollCommand(serverUrl, 'product-list-tab')).resolves.toMatchObject({
+      command: {
+        commandId: queued.commandId,
+        type: 'collect-targets',
+      },
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 6_001));
+
+    const disconnectedState = server.getState();
+    expect(disconnectedState.connected).toBe(false);
+    expect(disconnectedState.pendingCommands).toBe(0);
+    expect(disconnectedState.lastCommand).toMatchObject({
+      commandId: queued.commandId,
+      status: 'FAILED',
+    });
+    expect(disconnectedState.lastCommand?.message).toContain('상품 불러오기를 취소했습니다');
+    expect(disconnectedState.lastCommand?.message).toContain('Chrome 확장 연결이 끊겼습니다');
+  });
 });
 
 async function postHeartbeat(
