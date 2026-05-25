@@ -1,6 +1,5 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
-import fs from 'node:fs';
 
 import { app, BrowserWindow, clipboard, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
@@ -30,11 +29,7 @@ import type {
 } from '@smart-store/shared';
 import type { RunEvent } from '@smart-store/application';
 
-import {
-  type ChromeLaunchOptions,
-  openUrlInChrome,
-  resolveBundledAutomationBrowserExecutablePath,
-} from './chrome-launcher.js';
+import { type ChromeLaunchOptions, openUrlInChrome } from './chrome-launcher.js';
 import { HybridBridgeServer } from './hybrid-bridge-server.js';
 
 export class DesktopRunEventPublisher implements RunEventPublisherPort {
@@ -72,8 +67,6 @@ export class DesktopAppRuntime {
 
   private readonly extensionBuildPath: string;
 
-  private readonly automationBrowserRootPath: string;
-
   private readonly storageStateRepository = new FileStorageStateRepository();
 
   private readonly eventPublisher: DesktopRunEventPublisher;
@@ -110,9 +103,6 @@ export class DesktopAppRuntime {
     this.extensionBuildPath = app.isPackaged
       ? path.join(process.resourcesPath, 'chrome-extension')
       : path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
-    this.automationBrowserRootPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'playwright-runtime')
-      : path.join(process.cwd(), '.playwright-browsers');
     this.hybridBridgeServer = new HybridBridgeServer({
       extensionBuildPath: this.extensionBuildPath,
       chromeExtensionsUrl: 'chrome://extensions',
@@ -127,7 +117,7 @@ export class DesktopAppRuntime {
           this.authDir,
           'smartstore-storage-state.json',
         ),
-        userDataDir: path.join(this.authDir, 'automation-browser-profile'),
+        userDataDir: path.join(this.authDir, 'chrome-profile'),
         outputDir,
         headless: false,
         delayMs: 1_500,
@@ -199,8 +189,8 @@ export class DesktopAppRuntime {
   async openChromeExtensions(): Promise<void> {
     await this.openChromeTarget(
       'chrome://extensions',
-      '전용 브라우저 실행 파일을 찾지 못했습니다. 앱을 다시 빌드하거나 설치 파일을 다시 설치해 주세요.',
-      await this.createDedicatedBrowserLaunchOptions({ newWindow: false }),
+      'Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
+      this.createChromeLaunchOptions({ newWindow: false }),
     );
   }
 
@@ -208,8 +198,8 @@ export class DesktopAppRuntime {
     const settings = await this.orchestrator.settingsStore.loadSettings();
     await this.openChromeTarget(
       settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
-      '전용 브라우저 실행 파일을 찾지 못했습니다. 앱을 다시 빌드하거나 설치 파일을 다시 설치해 주세요.',
-      await this.createDedicatedBrowserLaunchOptions(),
+      'Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
+      this.createChromeLaunchOptions(),
     );
   }
 
@@ -449,17 +439,17 @@ export class DesktopAppRuntime {
       chromePath = await openUrlInChrome(target, options);
     } catch (error) {
       throw new Error(
-        `전용 브라우저 실행에 실패했습니다.${error instanceof Error ? `\n\n${error.message}` : ''}`,
+        `Chrome 실행에 실패했습니다.${error instanceof Error ? `\n\n${error.message}` : ''}`,
       );
     }
 
     if (chromePath) {
       await this.publishLog(
         'info',
-        'Opened dedicated browser workspace.',
+        'Opened Chrome workspace.',
         undefined,
         {
-          browserPath: chromePath,
+          chromePath,
           target,
           userDataDir: options.userDataDir ?? null,
           profileDirectory: options.profileDirectory ?? null,
@@ -472,7 +462,7 @@ export class DesktopAppRuntime {
 
     await this.publishLog(
       'error',
-      'Could not resolve the bundled automation browser executable. Dedicated browser was not opened.',
+      'Could not resolve a local Google Chrome executable. Chrome was not opened.',
       undefined,
       {
         target,
@@ -485,56 +475,12 @@ export class DesktopAppRuntime {
     throw new Error(fallbackMessage);
   }
 
-  private async createDedicatedBrowserLaunchOptions(
+  private createChromeLaunchOptions(
     options: Pick<ChromeLaunchOptions, 'newWindow'> = {},
-  ): Promise<ChromeLaunchOptions> {
-    const userDataDir = this.getDedicatedBrowserUserDataDir();
-    const extensionPath = this.getBundledExtensionPath();
-    const executablePath = this.getBundledAutomationBrowserPath();
-
-    if (!executablePath) {
-      throw new Error(
-        [
-          '번들된 전용 브라우저 실행 파일을 찾지 못해 판매자센터를 열 수 없습니다.',
-          `브라우저 런타임 경로: ${this.automationBrowserRootPath}`,
-          'npm run desktop:prepare-runtime을 실행한 뒤 다시 빌드하거나 설치 파일을 다시 설치해 주세요.',
-        ].join('\n'),
-      );
-    }
-
-    if (!extensionPath) {
-      throw new Error(
-        [
-          '번들된 Chrome 확장 파일을 찾지 못해 전용 브라우저를 열 수 없습니다.',
-          `확장 경로: ${this.extensionBuildPath}`,
-          '앱을 다시 빌드하거나 설치 파일을 다시 설치해 주세요.',
-        ].join('\n'),
-      );
-    }
-
+  ): ChromeLaunchOptions {
     return {
       ...options,
-      executablePath,
-      userDataDir,
-      profileDirectory: 'Default',
-      extensionPath,
     };
-  }
-
-  private getDedicatedBrowserUserDataDir(): string {
-    return path.join(this.authDir, 'automation-browser-profile');
-  }
-
-  private getBundledExtensionPath(): string | undefined {
-    const manifestPath = path.join(this.extensionBuildPath, 'manifest.json');
-    return fs.existsSync(manifestPath) ? this.extensionBuildPath : undefined;
-  }
-
-  private getBundledAutomationBrowserPath(): string | undefined {
-    return (
-      resolveBundledAutomationBrowserExecutablePath(this.automationBrowserRootPath) ??
-      undefined
-    );
   }
 
   private handleRunEvent(event: RunEvent): void {
