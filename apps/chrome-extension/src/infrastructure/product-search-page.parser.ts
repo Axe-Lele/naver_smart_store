@@ -41,6 +41,8 @@ const BUNDLE_DELIVERY_TERMS = [
 
 const DELIVERY_FEE_TERMS = ["배송비", "배송비결제", "delivery fee", "deliveryfee"];
 const CURRENT_PAGE_FALLBACK_LIMIT = 20;
+const EDIT_ACTION_READY_TIMEOUT_MS = 3_500;
+const EDIT_ACTION_POLL_MS = 80;
 
 const APPLIED_FILTER_SELECTORS = [
   "[class*='chip']",
@@ -373,23 +375,19 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
   }
 
   public async openEditForProduct(productId: string): Promise<boolean> {
-    await this.waitStrategy.waitForReady({ timeoutMs: 10_000, retries: 1 });
-
-    const row = this.resolveRowCandidates().find((candidate) => {
-      return this.resolveProductId(candidate, this.resolveEditUrl(candidate)) === productId;
-    });
-
-    if (!row) {
-      return false;
+    if (this.clickEditForProduct(productId)) {
+      return true;
     }
 
-    const editAction = this.resolveEditActionElement(row);
-    if (!editAction) {
-      return false;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < EDIT_ACTION_READY_TIMEOUT_MS) {
+      await delay(this.windowRef, EDIT_ACTION_POLL_MS);
+      if (this.clickEditForProduct(productId)) {
+        return true;
+      }
     }
 
-    triggerClick(editAction);
-    return true;
+    return false;
   }
 
   public async moveToNextResultPage(): Promise<{ ok: boolean; note: string }> {
@@ -416,6 +414,24 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     }
 
     return null;
+  }
+
+  private clickEditForProduct(productId: string): boolean {
+    const row = this.resolveRowCandidates().find((candidate) => {
+      return this.resolveProductId(candidate, this.resolveEditUrl(candidate)) === productId;
+    });
+
+    if (!row) {
+      return false;
+    }
+
+    const editAction = this.resolveEditActionElement(row);
+    if (!editAction) {
+      return false;
+    }
+
+    triggerClick(editAction);
+    return true;
   }
 
   private resolveEditActionElement(row: Element): Element | null {
@@ -1104,6 +1120,12 @@ function triggerClick(element: Element): void {
   }
 
   element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+}
+
+function delay(windowRef: Window, delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    windowRef.setTimeout(resolve, delayMs);
+  });
 }
 
 function extractParam(url: string | null, key: string): string | null {

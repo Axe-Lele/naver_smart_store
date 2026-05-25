@@ -29,6 +29,7 @@ import {
 
 const EDIT_NAVIGATION_TIMEOUT_MS = 3_500;
 const EDIT_NAVIGATION_POLL_MS = 100;
+const ROUTE_RESUME_DELAY_MS = 250;
 
 type BatchExecutionOptions = {
   selectedProductIds?: readonly string[];
@@ -327,7 +328,7 @@ export class BatchExecutionRunner {
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
         void this.continueIfNeeded(policy);
-      }, 1_500);
+      }, ROUTE_RESUME_DELAY_MS);
 
       const returning: BatchExecutionCheckpoint = {
         ...checkpoint,
@@ -461,7 +462,7 @@ export class BatchExecutionRunner {
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
         void this.continueIfNeeded(policy);
-      }, 1_500);
+      }, ROUTE_RESUME_DELAY_MS);
       return;
     }
 

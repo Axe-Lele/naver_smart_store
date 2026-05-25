@@ -66,6 +66,7 @@ const PREORDER_ENABLED_READY_TIMEOUT_MS = 1_200;
 const SAVE_COMPLETION_TIMEOUT_MS = 20_000;
 const PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS = 15_000;
 const FAST_POLL_MS = 80;
+const SAVE_FLOW_POLL_MS = 100;
 
 interface ConversionSurface {
   section?: Element;
@@ -2273,9 +2274,6 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
 
     scrollElementIntoView(saveButton);
     triggerUserClick(saveButton);
-    await this.waitStrategy.waitForReady({ timeoutMs: 15_000, retries: 1 });
-    this.clickConfirmationIfPresent();
-    await this.waitStrategy.waitForReady({ timeoutMs: 8_000, retries: 1 });
 
     const productManagement = await this.clickProductManagementAfterSave();
     if (!productManagement.ok) {
@@ -2325,10 +2323,20 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
     }
 
     const buttonAppeared = await this.waitUntil(
-      () => Boolean(this.resolveProductManagementButton()),
+      () => {
+        this.clickConfirmationIfPresent();
+        return (
+          isProductManagementListUrl(this.gateway.getPageUrl()) ||
+          Boolean(this.resolveProductManagementButton())
+        );
+      },
       SAVE_COMPLETION_TIMEOUT_MS,
-      250,
+      SAVE_FLOW_POLL_MS,
     );
+    if (isProductManagementListUrl(this.gateway.getPageUrl())) {
+      return { ok: true, note: "상품관리 목록 화면 복귀를 확인했습니다." };
+    }
+
     const productManagementButton = buttonAppeared
       ? this.resolveProductManagementButton()
       : undefined;
@@ -2341,12 +2349,11 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
 
     scrollElementIntoView(productManagementButton);
     triggerUserClick(productManagementButton);
-    await this.waitStrategy.waitForReady({ timeoutMs: 8_000, retries: 1 });
 
     const reachedList = await this.waitUntil(
       () => isProductManagementListUrl(this.gateway.getPageUrl()),
       PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS,
-      250,
+      SAVE_FLOW_POLL_MS,
     );
     if (!reachedList) {
       return {

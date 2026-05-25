@@ -410,6 +410,39 @@ describe('ProductSearchPageParser', () => {
     expect(clickHandler).toHaveBeenCalledTimes(1);
   });
 
+  it('opens a visible edit action without waiting for global page readiness', async () => {
+    const waitForReady = vi
+      .spyOn(WaitStrategy.prototype, 'waitForReady')
+      .mockRejectedValue(new Error('global readiness should not block a visible edit row'));
+    document.body.innerHTML = `
+      <input id="bundle-filter" checked value="묶음배송" />
+      <table>
+        <tbody>
+          <tr>
+            <td>778899</td>
+            <td><button class="edit-link">수정</button></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    const editButton = document.querySelector('.edit-link') as HTMLButtonElement;
+    const clickHandler = vi.fn();
+    editButton.addEventListener('click', clickHandler);
+
+    const parser = new ProductSearchPageParser(
+      createGateway(),
+      createRegistry(),
+      new DomExplorer(document),
+      document,
+      window,
+    );
+
+    await expect(parser.openEditForProduct('778899')).resolves.toBe(true);
+    expect(waitForReady).not.toHaveBeenCalled();
+    expect(clickHandler).toHaveBeenCalledTimes(1);
+  });
+
   it('clicks the ag-grid edit button in the row with the matching product number', async () => {
     document.body.innerHTML = `
       <input id="bundle-filter" checked value="묶음배송" />
