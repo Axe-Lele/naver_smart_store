@@ -2347,22 +2347,55 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
       };
     }
 
-    scrollElementIntoView(productManagementButton);
-    triggerUserClick(productManagementButton);
-
-    const reachedList = await this.waitUntil(
-      () => isProductManagementListUrl(this.gateway.getPageUrl()),
-      PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS,
-      SAVE_FLOW_POLL_MS,
+    const clicked = await this.clickProductManagementButtonUntilList(
+      productManagementButton,
     );
-    if (!reachedList) {
+    if (!clicked) {
       return {
         ok: false,
-        note: "상품관리 버튼은 클릭했지만 상품관리 목록 URL로 돌아온 것을 확인하지 못했습니다.",
+        note: "상품관리 버튼을 여러 방식으로 클릭했지만 상품관리 목록 URL로 돌아온 것을 확인하지 못했습니다.",
       };
     }
 
     return { ok: true, note: "상품관리 목록 화면 복귀를 확인했습니다." };
+  }
+
+  private async clickProductManagementButtonUntilList(
+    initialButton: Element,
+  ): Promise<boolean> {
+    const startedAt = Date.now();
+    const clickAttempts = [
+      (element: Element) => triggerUserClick(element),
+      (element: Element) => triggerClick(element),
+      (element: Element) => triggerKeyboardActivation(element),
+    ];
+
+    for (const clickAttempt of clickAttempts) {
+      if (isProductManagementListUrl(this.gateway.getPageUrl())) {
+        return true;
+      }
+
+      const button = this.resolveProductManagementButton() ?? initialButton;
+      scrollElementIntoView(button);
+      clickAttempt(button);
+
+      const remainingMs =
+        PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS - (Date.now() - startedAt);
+      if (remainingMs <= 0) {
+        break;
+      }
+
+      const reachedList = await this.waitUntil(
+        () => isProductManagementListUrl(this.gateway.getPageUrl()),
+        Math.min(remainingMs, 1_500),
+        SAVE_FLOW_POLL_MS,
+      );
+      if (reachedList) {
+        return true;
+      }
+    }
+
+    return isProductManagementListUrl(this.gateway.getPageUrl());
   }
 
   private selectSelectableOptionEnabledOnly(sectionOverride?: Element): { ok: boolean; note: string } {
@@ -2460,14 +2493,20 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
 
   private resolveProductManagementButton(): Element | undefined {
     for (const selector of [
-      'button[ng-click="vm.goSearch()"]',
-      'button.btn.btn-default[ng-click="vm.goSearch()"]',
+      'button[ng-click*="goSearch"]',
+      'a[ng-click*="goSearch"]',
+      '[role="button"][ng-click*="goSearch"]',
+      'button[data-ng-click*="goSearch"]',
+      'a[data-ng-click*="goSearch"]',
+      '[role="button"][data-ng-click*="goSearch"]',
+      '[ng-click*="goSearch"]',
+      '[data-ng-click*="goSearch"]',
     ]) {
       const explicit = Array.from(this.documentRef.querySelectorAll(selector)).find(
         (element) =>
           isVisible(element) &&
           !isDisabled(element) &&
-          includesAny(element.textContent, ["상품관리", "상품 관리"]),
+          isProductManagementReturnControl(element, this.documentRef),
       );
       if (explicit) {
         return explicit;
@@ -2476,7 +2515,11 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
 
     return Array.from(this.documentRef.querySelectorAll("button, a, [role='button']"))
       .filter((element) => isVisible(element) && !isDisabled(element))
-      .find((element) => includesAny(element.textContent, ["상품관리", "상품 관리"]));
+      .find(
+        (element) =>
+          isProductManagementReturnControl(element, this.documentRef) &&
+          isSaveCompletionContext(element),
+      );
   }
 
   private isConversionLocked(surface: ConversionSurface): boolean {
@@ -2550,7 +2593,57 @@ function isProductDetailPageUrl(url: string): boolean {
 
 function isProductManagementListUrl(url: string): boolean {
   const normalized = decodeURIComponentSafe(url).toLowerCase();
-  return normalized.includes("origin-list") || normalized.includes("product-list");
+  if (
+    normalized.includes("origin-edit") ||
+    normalized.includes("product-edit") ||
+    normalized.includes("products/edit") ||
+    normalized.includes("/edit") ||
+    normalized.includes("edit?")
+  ) {
+    return false;
+  }
+
+  return (
+    normalized.includes("origin-list") ||
+    normalized.includes("product-list") ||
+    normalized.includes("products/list") ||
+    /[#/]products(?:[/?#]|$)/.test(normalized)
+  );
+}
+
+function isSaveCompletionContext(element: Element): boolean {
+  let current: Element | null = element;
+
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    const text = normalizeWhitespace(current.textContent);
+    const hasProductManagement =
+      text.includes("상품관리") || text.includes("상품 관리");
+    const hasSaveCompletionHint =
+      text.includes("저장") ||
+      text.includes("완료") ||
+      text.includes("수정완료") ||
+      text.includes("수정 완료") ||
+      text.includes("상품수정") ||
+      text.includes("상품 수정");
+
+    if (hasProductManagement && hasSaveCompletionHint) {
+      return true;
+    }
+
+    current = current.parentElement;
+  }
+
+  return false;
+}
+
+function isProductManagementReturnControl(
+  element: Element,
+  documentRef: Document,
+): boolean {
+  return includesAny(resolveElementText(element, documentRef), [
+    "상품관리",
+    "상품 관리",
+  ]);
 }
 
 function hasProductEditAutomationSurface(documentRef: Document): boolean {
