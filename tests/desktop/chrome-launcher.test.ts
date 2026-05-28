@@ -34,6 +34,7 @@ describe('buildChromeLaunchArgs', () => {
     const extensionPath = path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
     const args = buildChromeLaunchArgs(target, {
       executablePath,
+      keepBackgroundActive: true,
       userDataDir,
       profileDirectory: 'Default',
       extensionPath,
@@ -53,6 +54,12 @@ describe('buildChromeLaunchArgs', () => {
     expect(args).toContain('--profile-directory=Default');
     expect(args).not.toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
+    expect(args).toContain('--disable-background-timer-throttling');
+    expect(args).toContain('--disable-renderer-backgrounding');
+    expect(args).toContain('--disable-backgrounding-occluded-windows');
+    expect(args).toContain(
+      '--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling',
+    );
     expect(args).toContain('--window-size=1000,750');
     expect(args).toContain('--window-position=896,306');
     expect(args).toContain('--new-window');

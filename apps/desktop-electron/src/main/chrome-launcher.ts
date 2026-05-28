@@ -30,8 +30,16 @@ const WINDOWS_CHROME_APP_PATH_REGISTRY_KEYS = [
   'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe',
 ] as const;
 
+const BACKGROUND_AUTOMATION_ARGS = [
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling',
+] as const;
+
 export type ChromeLaunchOptions = {
   executablePath?: string;
+  keepBackgroundActive?: boolean;
   newWindow?: boolean;
   windowSize?: {
     width: number;
@@ -188,6 +196,10 @@ export function buildChromeLaunchArgs(
     '--no-first-run',
     '--no-default-browser-check',
   ];
+
+  if (options.keepBackgroundActive) {
+    args.push(...BACKGROUND_AUTOMATION_ARGS);
+  }
 
   if (options.userDataDir) {
     args.push(`--user-data-dir=${path.resolve(options.userDataDir)}`);

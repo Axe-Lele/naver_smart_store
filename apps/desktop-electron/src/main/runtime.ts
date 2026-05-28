@@ -518,6 +518,7 @@ export class DesktopAppRuntime {
     options: Pick<
       ChromeLaunchOptions,
       | 'executablePath'
+      | 'keepBackgroundActive'
       | 'newWindow'
       | 'userDataDir'
       | 'profileDirectory'
@@ -530,6 +531,7 @@ export class DesktopAppRuntime {
     const launchOptions: ChromeLaunchOptions = {
       newWindow: options.newWindow,
       executablePath: options.executablePath,
+      keepBackgroundActive: options.keepBackgroundActive,
       userDataDir: options.userDataDir,
       profileDirectory: options.profileDirectory,
       extensionPath: options.extensionPath,
@@ -537,6 +539,7 @@ export class DesktopAppRuntime {
     };
 
     if (options.compactWorkWindow) {
+      launchOptions.keepBackgroundActive = true;
       const bounds = this.getCompactChromeWindowBounds();
       launchOptions.windowSize = {
         width: bounds.width,
