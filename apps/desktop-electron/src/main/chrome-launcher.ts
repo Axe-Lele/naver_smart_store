@@ -43,6 +43,7 @@ export type ChromeLaunchOptions = {
   userDataDir?: string;
   profileDirectory?: string;
   extensionPath?: string;
+  disableExtensionsExcept?: boolean;
 };
 
 export async function resolveChromeExecutablePath(): Promise<string | null> {
@@ -134,7 +135,9 @@ export function buildChromeLaunchArgs(
   }
 
   if (options.extensionPath) {
-    args.push(`--disable-extensions-except=${path.resolve(options.extensionPath)}`);
+    if (options.disableExtensionsExcept) {
+      args.push(`--disable-extensions-except=${path.resolve(options.extensionPath)}`);
+    }
     args.push(`--load-extension=${path.resolve(options.extensionPath)}`);
   }
 

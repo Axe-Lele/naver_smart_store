@@ -41,7 +41,7 @@ describe('buildChromeLaunchArgs', () => {
 
     expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
     expect(args).toContain('--profile-directory=Default');
-    expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
+    expect(args).not.toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
     expect(args).toContain('--window-size=1000,750');
     expect(args).toContain('--window-position=896,306');
@@ -60,7 +60,7 @@ describe('buildChromeLaunchArgs', () => {
     expect(args.at(-1)).toBe(target);
   });
 
-  it('still supports explicit profile and extension flags for diagnostic launches', () => {
+  it('loads an unpacked extension without disabling the rest of the profile by default', () => {
     const target = 'chrome://extensions';
     const userDataDir = path.join(process.cwd(), '.auth', 'chrome-profile');
     const extensionPath = path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
@@ -73,6 +73,19 @@ describe('buildChromeLaunchArgs', () => {
 
     expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
     expect(args).toContain('--profile-directory=Default');
+    expect(args).not.toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
+    expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
+  });
+
+  it('can still disable other extensions for diagnostic launches', () => {
+    const target = 'chrome://extensions';
+    const extensionPath = path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
+
+    const args = buildChromeLaunchArgs(target, {
+      extensionPath,
+      disableExtensionsExcept: true,
+    });
+
     expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
   });

@@ -1,6 +1,6 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
 
 import { app, BrowserWindow, clipboard, screen, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
@@ -74,6 +74,8 @@ export class DesktopAppRuntime {
 
   private readonly authDir: string;
 
+  private readonly bundledExtensionBuildPath: string;
+
   private readonly extensionBuildPath: string;
 
   private readonly storageStateRepository = new FileStorageStateRepository();
@@ -109,9 +111,10 @@ export class DesktopAppRuntime {
     this.eventPublisher = new DesktopRunEventPublisher((event) =>
       this.handleRunEvent(event),
     );
-    this.extensionBuildPath = app.isPackaged
+    this.bundledExtensionBuildPath = app.isPackaged
       ? path.join(process.resourcesPath, 'chrome-extension')
       : path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
+    this.extensionBuildPath = this.prepareRuntimeChromeExtensionPath();
     this.hybridBridgeServer = new HybridBridgeServer({
       extensionBuildPath: this.extensionBuildPath,
       chromeExtensionsUrl: 'chrome://extensions',
@@ -203,7 +206,7 @@ export class DesktopAppRuntime {
         newWindow: false,
         userDataDir: this.getDefaultChromeUserDataDir(),
         profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
-        extensionPath: this.getBundledChromeExtensionPath(),
+        extensionPath: this.getChromeExtensionPath(),
       }),
     );
   }
@@ -218,7 +221,7 @@ export class DesktopAppRuntime {
         compactWorkWindow: true,
         userDataDir,
         profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
-        extensionPath: this.getBundledChromeExtensionPath(),
+        extensionPath: this.getChromeExtensionPath(),
       }),
     );
   }
@@ -533,10 +536,32 @@ export class DesktopAppRuntime {
     return path.join(this.authDir, 'chrome-profile');
   }
 
-  private getBundledChromeExtensionPath(): string | undefined {
+  private getChromeExtensionPath(): string | undefined {
     return existsSync(path.join(this.extensionBuildPath, 'manifest.json'))
       ? this.extensionBuildPath
       : undefined;
+  }
+
+  private prepareRuntimeChromeExtensionPath(): string {
+    const runtimeExtensionPath = path.join(
+      this.dataRoot,
+      app.isPackaged ? 'chrome-extension' : '.desktop-app/chrome-extension',
+    );
+
+    if (!existsSync(path.join(this.bundledExtensionBuildPath, 'manifest.json'))) {
+      return this.bundledExtensionBuildPath;
+    }
+
+    try {
+      mkdirSync(path.dirname(runtimeExtensionPath), { recursive: true });
+      cpSync(this.bundledExtensionBuildPath, runtimeExtensionPath, {
+        recursive: true,
+        force: true,
+      });
+      return runtimeExtensionPath;
+    } catch {
+      return this.bundledExtensionBuildPath;
+    }
   }
 
   private getCompactChromeWindowBounds(): {
