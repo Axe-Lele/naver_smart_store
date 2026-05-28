@@ -353,7 +353,7 @@ export function App() {
       await refreshHybridState();
       setNotice({
         tone: 'info',
-        text: '일반 Chrome을 열고 기존 프로필로 로그인한 뒤, 상품 조회/수정 화면에서 상품 불러오기를 누르면 됩니다.',
+        text: '작업용 Chrome을 열고 전용 프로필에서 직접 로그인한 뒤, 상품 조회/수정 화면에서 상품 불러오기를 누르면 됩니다.',
       });
     } catch (error) {
       showError(error);
@@ -706,7 +706,7 @@ export function App() {
       await window.desktopApi.hybrid.openSellerCenter();
       setNotice({
         tone: 'success',
-        text: '작업용 작은 Chrome 창을 열었습니다. 기존 Chrome 프로필에서 직접 로그인한 뒤 상품 조회/수정 화면을 확인해 주세요.',
+        text: '작업용 Chrome 창을 열었습니다. 앱 전용 프로필에서 직접 로그인한 뒤 상품 조회/수정 화면을 확인해 주세요.',
       });
     } catch (error) {
       showError(error);
@@ -733,7 +733,7 @@ export function App() {
       setNotice({
         tone: 'success',
         text:
-          '확장 폴더 경로를 복사하고 Chrome 확장 관리 화면을 열었습니다. 압축해제된 확장 프로그램 로드로 열린 폴더를 한 번 선택하면 기존 Chrome 프로필에 유지됩니다.',
+          '확장 폴더 경로를 복사하고 작업용 Chrome 확장 관리 화면을 열었습니다. 자동 로드가 보이지 않으면 압축해제된 확장 프로그램 로드로 열린 폴더를 선택해 주세요.',
       });
     } catch (error) {
       showError(error);
@@ -799,7 +799,7 @@ export function App() {
             className="secondary-button"
             onClick={() => void handleOpenSellerCenter()}
           >
-            Chrome 열기
+            작업용 Chrome
           </button>
           <button
             type="button"
@@ -997,7 +997,7 @@ export function App() {
             <details className="side-details">
               <summary>사용 순서</summary>
               <ol className="simple-step-list">
-                <li>일반 Chrome에서 로그인합니다.</li>
+                <li>작업용 Chrome에서 로그인합니다.</li>
                 <li>묶음배송 검색 결과를 엽니다.</li>
                 <li>현재 페이지 상품을 불러옵니다.</li>
                 <li>제외할 상품 체크를 풉니다.</li>
@@ -1077,7 +1077,7 @@ export function App() {
             <section className="side-card compact-side-card">
               <h2>연결되지 않을 때</h2>
               <p className="muted">
-                일반 Chrome에서는 확장을 한 번 수동 설치해야 합니다. 설치 후 연결되지 않으면 상품 조회/수정 탭을 Ctrl+R로 새로고침하세요.
+                작업용 Chrome은 앱 전용 프로필과 번들 확장을 사용합니다. 연결되지 않으면 상품 조회/수정 탭을 Ctrl+R로 새로고침하세요.
               </p>
               <div className="side-button-stack">
                 <button
@@ -1085,7 +1085,7 @@ export function App() {
                   className="primary-button"
                   onClick={() => void handleExtensionSetupHelper()}
                 >
-                  확장 확인/수동 설치
+                  확장 확인
                 </button>
               </div>
             </section>

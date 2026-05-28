@@ -171,7 +171,7 @@ export function getRecommendedNextStep(input: {
   if (!input.connected) {
     return input.extensionPackageAvailable === false
       ? '확장 파일이 없습니다. 패키지를 다시 빌드하세요.'
-      : 'Chrome을 열고 상품 조회/수정 탭에서 새로고침하세요.';
+      : '작업용 Chrome을 열고 상품 조회/수정 탭에서 새로고침하세요.';
   }
 
   if (input.pendingCommand === 'collect-targets') {

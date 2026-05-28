@@ -21,9 +21,14 @@ describe('buildChromeLaunchArgs', () => {
     expect(args.at(-1)).toBe(target);
   });
 
-  it('supports opening a compact work window for seller-center automation', () => {
+  it('supports opening a compact dedicated-profile work window for seller-center automation', () => {
     const target = 'https://sell.smartstore.naver.com/#/products/origin-list';
+    const userDataDir = path.join(process.cwd(), '.auth', 'chrome-profile');
+    const extensionPath = path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
     const args = buildChromeLaunchArgs(target, {
+      userDataDir,
+      profileDirectory: 'Default',
+      extensionPath,
       windowSize: {
         width: 1000,
         height: 750,
@@ -34,6 +39,10 @@ describe('buildChromeLaunchArgs', () => {
       },
     });
 
+    expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
+    expect(args).toContain('--profile-directory=Default');
+    expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
+    expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
     expect(args).toContain('--window-size=1000,750');
     expect(args).toContain('--window-position=896,306');
     expect(args).toContain('--new-window');

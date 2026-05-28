@@ -1,5 +1,6 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 
 import { app, BrowserWindow, clipboard, screen, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
@@ -38,6 +39,7 @@ const COMPACT_CHROME_WINDOW_SIZE = {
 } as const;
 
 const COMPACT_CHROME_WINDOW_MARGIN = 24;
+const DEDICATED_CHROME_PROFILE_DIRECTORY = 'Default';
 
 export class DesktopRunEventPublisher implements RunEventPublisherPort {
   private readonly history: RunEvent[] = [];
@@ -124,7 +126,7 @@ export class DesktopAppRuntime {
           this.authDir,
           'smartstore-storage-state.json',
         ),
-        userDataDir: path.join(this.authDir, 'chrome-profile'),
+        userDataDir: this.getDefaultChromeUserDataDir(),
         outputDir,
         headless: false,
         delayMs: 1_500,
@@ -197,17 +199,26 @@ export class DesktopAppRuntime {
     await this.openChromeTarget(
       'chrome://extensions',
       'Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
-      this.createChromeLaunchOptions({ newWindow: false }),
+      this.createChromeLaunchOptions({
+        newWindow: false,
+        userDataDir: this.getDefaultChromeUserDataDir(),
+        profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
+        extensionPath: this.getBundledChromeExtensionPath(),
+      }),
     );
   }
 
   async openSellerCenter(): Promise<void> {
     const settings = await this.orchestrator.settingsStore.loadSettings();
+    const userDataDir = settings.userDataDir ?? this.getDefaultChromeUserDataDir();
     await this.openChromeTarget(
       settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
       'Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
       this.createChromeLaunchOptions({
         compactWorkWindow: true,
+        userDataDir,
+        profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
+        extensionPath: this.getBundledChromeExtensionPath(),
       }),
     );
   }
@@ -489,12 +500,18 @@ export class DesktopAppRuntime {
   }
 
   private createChromeLaunchOptions(
-    options: Pick<ChromeLaunchOptions, 'newWindow'> & {
+    options: Pick<
+      ChromeLaunchOptions,
+      'newWindow' | 'userDataDir' | 'profileDirectory' | 'extensionPath'
+    > & {
       compactWorkWindow?: boolean;
     } = {},
   ): ChromeLaunchOptions {
     const launchOptions: ChromeLaunchOptions = {
       newWindow: options.newWindow,
+      userDataDir: options.userDataDir,
+      profileDirectory: options.profileDirectory,
+      extensionPath: options.extensionPath,
     };
 
     if (options.compactWorkWindow) {
@@ -510,6 +527,16 @@ export class DesktopAppRuntime {
     }
 
     return launchOptions;
+  }
+
+  private getDefaultChromeUserDataDir(): string {
+    return path.join(this.authDir, 'chrome-profile');
+  }
+
+  private getBundledChromeExtensionPath(): string | undefined {
+    return existsSync(path.join(this.extensionBuildPath, 'manifest.json'))
+      ? this.extensionBuildPath
+      : undefined;
   }
 
   private getCompactChromeWindowBounds(): {
