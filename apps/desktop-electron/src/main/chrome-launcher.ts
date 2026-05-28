@@ -32,6 +32,14 @@ const WINDOWS_CHROME_APP_PATH_REGISTRY_KEYS = [
 
 export type ChromeLaunchOptions = {
   newWindow?: boolean;
+  windowSize?: {
+    width: number;
+    height: number;
+  };
+  windowPosition?: {
+    x: number;
+    y: number;
+  };
   userDataDir?: string;
   profileDirectory?: string;
   extensionPath?: string;
@@ -128,6 +136,14 @@ export function buildChromeLaunchArgs(
   if (options.extensionPath) {
     args.push(`--disable-extensions-except=${path.resolve(options.extensionPath)}`);
     args.push(`--load-extension=${path.resolve(options.extensionPath)}`);
+  }
+
+  if (options.windowSize) {
+    args.push(`--window-size=${options.windowSize.width},${options.windowSize.height}`);
+  }
+
+  if (options.windowPosition) {
+    args.push(`--window-position=${options.windowPosition.x},${options.windowPosition.y}`);
   }
 
   if (options.newWindow !== false) {

@@ -59,7 +59,10 @@ const TEMP_STOP_AFTER_PREORDER_DISCLOSURE_CLICK = true;
 const TEMP_STOP_AFTER_ORDER_PERIOD_END_TIME_CLICK = true;
 const TEMP_PREORDER_FLOW_SUCCESS_MESSAGE =
   "예약구매 설정을 저장하고 상품관리 목록으로 복귀했습니다.";
-const FAST_HUMAN_ACTION_DELAY_MS = 280;
+const FAST_HUMAN_ACTION_DELAY_MS = 120;
+const PAGE_ACTION_RETRY_ATTEMPTS = 3;
+const PAGE_ACTION_RETRY_DELAY_MS = 120;
+const PAGE_ACTION_CONFIRM_TIMEOUT_MS = 500;
 const EDIT_SURFACE_READY_TIMEOUT_MS = 3_500;
 const PREORDER_EXPAND_READY_TIMEOUT_MS = 1_200;
 const PREORDER_ENABLED_READY_TIMEOUT_MS = 1_200;
@@ -125,6 +128,14 @@ type PageChoiceOptionValueFillPort = (input: {
 }) => Promise<boolean>;
 type PageOptionListApplyClickPort = () => Promise<boolean>;
 
+interface RetriablePageActionInput {
+  action?: () => Promise<boolean>;
+  missingNote: string;
+  failedNote: string;
+  successNote: string;
+  isSatisfied?: () => boolean;
+}
+
 export class ProductEditPageDriver implements ProductEditPageDriverPort {
   private readonly explorer: DomExplorer;
   private readonly locator: ElementLocator;
@@ -171,6 +182,46 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
 
   private async waitForFastHumanAction(): Promise<void> {
     await this.waitStrategy.throttle(FAST_HUMAN_ACTION_DELAY_MS);
+  }
+
+  private async runRetriablePageAction(
+    input: RetriablePageActionInput,
+  ): Promise<UiOperationResult> {
+    if (!input.action) {
+      return { ok: false, note: input.missingNote };
+    }
+
+    let clickedAtLeastOnce = false;
+    for (let attempt = 1; attempt <= PAGE_ACTION_RETRY_ATTEMPTS; attempt += 1) {
+      if (await input.action()) {
+        clickedAtLeastOnce = true;
+        await this.waitForFastHumanAction();
+
+        if (
+          !input.isSatisfied ||
+          input.isSatisfied() ||
+          await this.waitUntil(
+            input.isSatisfied,
+            PAGE_ACTION_CONFIRM_TIMEOUT_MS,
+            FAST_POLL_MS,
+          )
+        ) {
+          return { ok: true, note: input.successNote };
+        }
+      }
+
+      if (attempt < PAGE_ACTION_RETRY_ATTEMPTS) {
+        await this.waitStrategy.throttle(PAGE_ACTION_RETRY_DELAY_MS);
+      }
+    }
+
+    return {
+      ok: false,
+      note:
+        `${input.failedNote}` +
+        `${clickedAtLeastOnce ? " 클릭은 실행됐지만 상태 확인에 실패했습니다." : ""}` +
+        ` (${PAGE_ACTION_RETRY_ATTEMPTS}회 시도)`,
+    };
   }
 
   private async waitForProductEditSurfaceReady(): Promise<void> {
@@ -664,27 +715,15 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
   }
 
   private async clickPagePreorderEnabled(): Promise<UiOperationResult> {
-    if (!this.pagePreorderEnabledClick) {
-      return {
-        ok: false,
-        note: "예약구매 설정함 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pagePreorderEnabledClick()) {
-      return {
-        ok: false,
-        note: "예약구매 설정함 input#preOrder1_1을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-
-    if (!await this.waitForPreorderEnabledConfirmed()) {
-      return {
-        ok: false,
-        note: "예약구매 설정함 input#preOrder1_1을 페이지 핸들러로 클릭했지만 선택 상태를 확인하지 못했습니다.",
-      };
+    const enabled = await this.runRetriablePageAction({
+      action: this.pagePreorderEnabledClick,
+      missingNote: "예약구매 설정함 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "예약구매 설정함 input#preOrder1_1을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "예약구매 설정함 input#preOrder1_1을 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => isPreorderEnabledConfirmed(this.resolveConversionSurface(), true),
+    });
+    if (!enabled.ok) {
+      return enabled;
     }
 
     const expanded = await this.ensurePreorderControlsVisibleAfterActivation();
@@ -722,223 +761,105 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
   }
 
   private async clickPageOrderStartCalendar(): Promise<UiOperationResult> {
-    if (!this.pageOrderStartCalendarClick) {
-      return {
-        ok: false,
-        note: "주문 시작일 달력보기 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOrderStartCalendarClick()) {
-      return {
-        ok: false,
-        note: "주문 시작일 달력보기 a[role=button]를 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "주문 시작일 달력보기 a[role=button]를 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageOrderStartCalendarClick,
+      missingNote: "주문 시작일 달력보기 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "주문 시작일 달력보기 a[role=button]를 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "주문 시작일 달력보기 a[role=button]를 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => Boolean(findAnyOpenDatePicker(this.documentRef)),
+    });
   }
 
   private async clickPageOrderStartCurrentDay(): Promise<UiOperationResult> {
-    if (!this.pageOrderStartCurrentDayClick) {
-      return {
-        ok: false,
-        note: "주문 시작일 현재 날짜 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOrderStartCurrentDayClick()) {
-      return {
-        ok: false,
-        note: "주문 시작일 picker의 td.day.current span[data-ng-click]를 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "주문 시작일 picker의 td.day.current span[data-ng-click]를 페이지 핸들러로 클릭했습니다.",
-    };
+    const today = this.getSystemToday();
+    return this.runRetriablePageAction({
+      action: this.pageOrderStartCurrentDayClick,
+      missingNote: "주문 시작일 현재 날짜 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "주문 시작일 picker의 td.day.current span[data-ng-click]를 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "주문 시작일 picker의 td.day.current span[data-ng-click]를 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => Boolean(findTimePickerForDate(this.documentRef, today)),
+    });
   }
 
   private async clickPageOrderStartCurrentHour(): Promise<UiOperationResult> {
-    if (!this.pageOrderStartCurrentHourClick) {
-      return {
-        ok: false,
-        note: "주문 시작일 현재 시간 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOrderStartCurrentHourClick()) {
-      return {
-        ok: false,
-        note: "주문 시작일 picker의 span.hour.current em[data-ng-click]를 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "주문 시작일 picker의 span.hour.current em[data-ng-click]를 페이지 핸들러로 클릭했습니다.",
-    };
+    const today = this.getSystemToday();
+    return this.runRetriablePageAction({
+      action: this.pageOrderStartCurrentHourClick,
+      missingNote: "주문 시작일 현재 시간 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "주문 시작일 picker의 span.hour.current em[data-ng-click]를 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "주문 시작일 picker의 span.hour.current em[data-ng-click]를 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => !findTimePickerForDate(this.documentRef, today),
+    });
   }
 
   private async clickPageOrderEndCalendar(): Promise<UiOperationResult> {
-    if (!this.pageOrderEndCalendarClick) {
-      return {
-        ok: false,
-        note: "주문기간 종료 달력보기 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOrderEndCalendarClick()) {
-      return {
-        ok: false,
-        note: "주문기간 종료 달력보기 a[role=button]를 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "주문기간 종료 달력보기 a[role=button]를 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageOrderEndCalendarClick,
+      missingNote: "주문기간 종료 달력보기 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "주문기간 종료 달력보기 a[role=button]를 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "주문기간 종료 달력보기 a[role=button]를 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => Boolean(findAnyOpenDatePicker(this.documentRef)),
+    });
   }
 
   private async clickPageOrderEndYearNext(): Promise<UiOperationResult> {
-    if (!this.pageOrderEndYearNextClick) {
-      return {
-        ok: false,
-        note: "종료일 1년 뒤 버튼 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOrderEndYearNextClick()) {
-      return {
-        ok: false,
-        note: "종료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "종료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageOrderEndYearNextClick,
+      missingNote: "종료일 1년 뒤 버튼 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "종료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "종료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭했습니다.",
+    });
   }
 
   private async clickPageOrderEndLastEnabledDay(): Promise<UiOperationResult> {
-    if (!this.pageOrderEndLastEnabledDayClick) {
-      return {
-        ok: false,
-        note: "종료일 마지막 활성 날짜 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOrderEndLastEnabledDayClick()) {
-      return {
-        ok: false,
-        note: "종료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "종료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭했습니다.",
-    };
+    const oneYearLater = addYearsClamped(this.getSystemToday(), 1);
+    return this.runRetriablePageAction({
+      action: this.pageOrderEndLastEnabledDayClick,
+      missingNote: "종료일 마지막 활성 날짜 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "종료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "종료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => Boolean(findTimePickerForDate(this.documentRef, oneYearLater)),
+    });
   }
 
   private async clickPageOrderEndLastEnabledHour(): Promise<UiOperationResult> {
-    if (!this.pageOrderEndLastEnabledHourClick) {
-      return {
-        ok: false,
-        note: "종료일 마지막 활성 시간 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOrderEndLastEnabledHourClick()) {
-      return {
-        ok: false,
-        note: "종료일 달력의 disabled가 아닌 마지막 span.hour em을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "종료일 달력의 disabled가 아닌 마지막 span.hour em을 페이지 핸들러로 클릭했습니다.",
-    };
+    const oneYearLater = addYearsClamped(this.getSystemToday(), 1);
+    return this.runRetriablePageAction({
+      action: this.pageOrderEndLastEnabledHourClick,
+      missingNote: "종료일 마지막 활성 시간 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "종료일 달력의 disabled가 아닌 마지막 span.hour em을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "종료일 달력의 disabled가 아닌 마지막 span.hour em을 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => !findTimePickerForDate(this.documentRef, oneYearLater),
+    });
   }
 
   private async clickPageAfterSaleStatusOn(): Promise<UiOperationResult> {
-    if (!this.pageAfterSaleStatusOnClick) {
-      return {
-        ok: false,
-        note: "판매 중 상태 input 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageAfterSaleStatusOnClick()) {
-      return {
-        ok: false,
-        note: "판매 중 상태 input#afterSaleStatus2를 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "판매 중 상태 input#afterSaleStatus2를 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageAfterSaleStatusOnClick,
+      missingNote: "판매 중 상태 input 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "판매 중 상태 input#afterSaleStatus2를 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "판매 중 상태 input#afterSaleStatus2를 페이지 핸들러로 클릭했습니다.",
+    });
   }
 
   private async clickPageDispatchCompletionCalendar(): Promise<UiOperationResult> {
-    if (!this.pageDispatchCompletionCalendarClick) {
-      return {
-        ok: false,
-        note: "발송완료일 달력보기 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageDispatchCompletionCalendarClick()) {
-      return {
-        ok: false,
-        note: "발송완료일 달력보기 a[role=button]를 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "발송완료일 달력보기 a[role=button]를 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageDispatchCompletionCalendarClick,
+      missingNote: "발송완료일 달력보기 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "발송완료일 달력보기 a[role=button]를 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "발송완료일 달력보기 a[role=button]를 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => Boolean(findAnyOpenDatePicker(this.documentRef)),
+    });
   }
 
   private async clickPageDispatchCompletionYearNext(): Promise<UiOperationResult> {
-    if (!this.pageDispatchCompletionYearNextClick) {
-      return {
-        ok: false,
-        note: "발송완료일 오른쪽 이중 화살표 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageDispatchCompletionYearNextClick()) {
-      return {
-        ok: false,
-        note: "발송완료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "발송완료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageDispatchCompletionYearNextClick,
+      missingNote: "발송완료일 오른쪽 이중 화살표 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "발송완료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "발송완료일 달력의 changeViewNextYear 오른쪽 버튼을 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => Boolean(findAnyOpenDatePicker(this.documentRef)),
+    });
   }
 
   private async clickPageDispatchCompletionMonthNextThreeTimes(): Promise<UiOperationResult> {
@@ -950,14 +871,18 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
     }
 
     for (let index = 0; index < 3; index += 1) {
-      if (!await this.pageDispatchCompletionMonthNextClick()) {
+      const clicked = await this.runRetriablePageAction({
+        action: this.pageDispatchCompletionMonthNextClick,
+        missingNote: "발송완료일 오른쪽 한 개 화살표 페이지 핸들러가 연결되어 있지 않습니다.",
+        failedNote: `발송완료일 달력의 changeView(data.currentView, data.rightDate, $event) 오른쪽 버튼 ${index + 1}번째 클릭을 페이지 핸들러로 실행하지 못했습니다.`,
+        successNote: `발송완료일 달력의 changeView(data.currentView, data.rightDate, $event) 오른쪽 버튼 ${index + 1}번째 클릭을 페이지 핸들러로 실행했습니다.`,
+      });
+      if (!clicked.ok) {
         return {
           ok: false,
-          note: `발송완료일 달력의 changeView(data.currentView, data.rightDate, $event) 오른쪽 버튼 ${index + 1}번째 클릭을 페이지 핸들러로 실행하지 못했습니다.`,
+          note: clicked.note,
         };
       }
-
-      await this.waitForFastHumanAction();
     }
 
     return {
@@ -967,91 +892,53 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
   }
 
   private async clickPageDispatchCompletionLastEnabledDay(): Promise<UiOperationResult> {
-    if (!this.pageDispatchCompletionLastEnabledDayClick) {
-      return {
-        ok: false,
-        note: "발송완료일 마지막 활성 날짜 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageDispatchCompletionLastEnabledDayClick()) {
-      return {
-        ok: false,
-        note: "발송완료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "발송완료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭했습니다.",
-    };
+    const beforeValue = this.readDispatchCompletionDateControlValue();
+    return this.runRetriablePageAction({
+      action: this.pageDispatchCompletionLastEnabledDayClick,
+      missingNote: "발송완료일 마지막 활성 날짜 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "발송완료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "발송완료일 달력의 disabled가 아닌 마지막 td.day span을 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => {
+        const afterValue = this.readDispatchCompletionDateControlValue();
+        return (
+          !findAnyOpenDatePicker(this.documentRef) ||
+          (beforeValue !== undefined && afterValue !== beforeValue)
+        );
+      },
+    });
   }
 
   private async clickPageOptionMenuToggle(): Promise<UiOperationResult> {
-    if (!this.pageOptionMenuToggleClick) {
-      return {
-        ok: false,
-        note: "메뉴토글 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOptionMenuToggleClick()) {
-      return {
-        ok: false,
-        note: "a.btn.btn-default[ng-class*=vm.isMenuOpen] 메뉴토글을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "a.btn.btn-default[ng-class*=vm.isMenuOpen] 메뉴토글을 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageOptionMenuToggleClick,
+      missingNote: "메뉴토글 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "a.btn.btn-default[ng-class*=vm.isMenuOpen] 메뉴토글을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "a.btn.btn-default[ng-class*=vm.isMenuOpen] 메뉴토글을 페이지 핸들러로 클릭했습니다.",
+      isSatisfied: () => {
+        const section =
+          this.locator.resolveFirst("editor.optionSection").element ??
+          findSectionByHints(this.documentRef, OPTION_SECTION_HINTS);
+        return Boolean(section && hasExpandedOptionControls(section));
+      },
+    });
   }
 
   private async clickPageChoiceTypeOn(): Promise<UiOperationResult> {
-    if (!this.pageChoiceTypeOnClick) {
-      return {
-        ok: false,
-        note: "선택형 설정함 input 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageChoiceTypeOnClick()) {
-      return {
-        ok: false,
-        note: "#option_choice_type_true 선택형 설정함 input을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "#option_choice_type_true 선택형 설정함 input을 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageChoiceTypeOnClick,
+      missingNote: "선택형 설정함 input 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "#option_choice_type_true 선택형 설정함 input을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "#option_choice_type_true 선택형 설정함 input을 페이지 핸들러로 클릭했습니다.",
+    });
   }
 
   private async clickPageChoiceSimpleType(): Promise<UiOperationResult> {
-    if (!this.pageChoiceSimpleTypeClick) {
-      return {
-        ok: false,
-        note: "단독형 input 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageChoiceSimpleTypeClick()) {
-      return {
-        ok: false,
-        note: "input[ng-model='vm.choiceType'][value='SIMPLE'] 단독형 input을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: "input[ng-model='vm.choiceType'][value='SIMPLE'] 단독형 input을 페이지 핸들러로 클릭했습니다.",
-    };
+    return this.runRetriablePageAction({
+      action: this.pageChoiceSimpleTypeClick,
+      missingNote: "단독형 input 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "input[ng-model='vm.choiceType'][value='SIMPLE'] 단독형 input을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: "input[ng-model='vm.choiceType'][value='SIMPLE'] 단독형 input을 페이지 핸들러로 클릭했습니다.",
+    });
   }
 
   private async fillPageChoiceOptionName(
@@ -1065,18 +952,19 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
       };
     }
 
-    if (!await this.pageChoiceOptionNameFill({ value: option.name, index })) {
-      return {
-        ok: false,
-        note: `${index + 1}번째 옵션명 input에 '${option.name}'을 입력하지 못했습니다.`,
-      };
+    const filled = await this.runRetriablePageAction({
+      action: () =>
+        this.pageChoiceOptionNameFill?.({ value: option.name, index }) ??
+        Promise.resolve(false),
+      missingNote: "옵션명 input 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: `${index + 1}번째 옵션명 input에 '${option.name}'을 입력하지 못했습니다.`,
+      successNote: `${index + 1}번째 옵션명 input에 '${option.name}'을 입력했습니다.`,
+    });
+    if (!filled.ok) {
+      return filled;
     }
 
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: `${index + 1}번째 옵션명 input에 '${option.name}'을 입력했습니다.`,
-    };
+    return filled;
   }
 
   private async fillPageChoiceOptionValue(
@@ -1090,40 +978,28 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
       };
     }
 
-    if (!await this.pageChoiceOptionValueFill({ value: option.value, index })) {
-      return {
-        ok: false,
-        note: `${index + 1}번째 옵션값 input에 '${option.value}'을 입력하지 못했습니다.`,
-      };
+    const filled = await this.runRetriablePageAction({
+      action: () =>
+        this.pageChoiceOptionValueFill?.({ value: option.value, index }) ??
+        Promise.resolve(false),
+      missingNote: "옵션값 input 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: `${index + 1}번째 옵션값 input에 '${option.value}'을 입력하지 못했습니다.`,
+      successNote: `${index + 1}번째 옵션값 input에 '${option.value}'을 입력했습니다.`,
+    });
+    if (!filled.ok) {
+      return filled;
     }
 
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: `${index + 1}번째 옵션값 input에 '${option.value}'을 입력했습니다.`,
-    };
+    return filled;
   }
 
   private async clickPageOptionListApply(index = 0): Promise<UiOperationResult> {
-    if (!this.pageOptionListApplyClick) {
-      return {
-        ok: false,
-        note: "옵션목록으로 적용 페이지 핸들러가 연결되어 있지 않습니다.",
-      };
-    }
-
-    if (!await this.pageOptionListApplyClick()) {
-      return {
-        ok: false,
-        note: "a.btn.btn-primary.btn-block[ng-click*=submitToGrid] 옵션목록으로 적용 버튼을 페이지 핸들러로 클릭하지 못했습니다.",
-      };
-    }
-
-    await this.waitForFastHumanAction();
-    return {
-      ok: true,
-      note: `${index + 1}번째 옵션목록으로 적용 버튼을 페이지 핸들러로 클릭했습니다.`,
-    };
+    return this.runRetriablePageAction({
+      action: this.pageOptionListApplyClick,
+      missingNote: "옵션목록으로 적용 페이지 핸들러가 연결되어 있지 않습니다.",
+      failedNote: "a.btn.btn-primary.btn-block[ng-click*=submitToGrid] 옵션목록으로 적용 버튼을 페이지 핸들러로 클릭하지 못했습니다.",
+      successNote: `${index + 1}번째 옵션목록으로 적용 버튼을 페이지 핸들러로 클릭했습니다.`,
+    });
   }
 
   private async runTemporaryPreorderClickFlow(): Promise<UiOperationResult[]> {

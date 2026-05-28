@@ -66,7 +66,7 @@ describe('ProductEditPageDriver preorder disclosure', () => {
       expect(result.state).toBe(ProductProcessingState.STOPPED);
       expect(result.message).toContain('주문 시작일 달력보기');
     }
-    expect(steps).toEqual(['expand', 'enable', 'calendar']);
+    expect(steps).toEqual(['expand', 'enable', 'calendar', 'calendar', 'calendar']);
     expect(document.querySelector('#preorderToggle')?.getAttribute('aria-expanded')).toBe('true');
   });
 });

@@ -84,6 +84,9 @@ describe("ProductEditPageDriver save return", () => {
 });
 
 function createDriver(getPageUrl: () => string): ProductEditPageDriver {
+  const today = getTodayParts();
+  const oneYearLater = addYearsClamped(today, 1);
+
   return new ProductEditPageDriver(
     createGateway(getPageUrl),
     new InMemorySelectorRegistry(),
@@ -94,24 +97,128 @@ function createDriver(getPageUrl: () => string): ProductEditPageDriver {
     undefined,
     async () => true,
     async () => true,
+    async () => {
+      renderDatePicker();
+      return true;
+    },
+    async () => {
+      renderTimePicker(today);
+      return true;
+    },
+    async () => {
+      removeTimePicker();
+      return true;
+    },
+    async () => {
+      renderDatePicker();
+      return true;
+    },
+    async () => true,
+    async () => {
+      renderTimePicker(oneYearLater);
+      return true;
+    },
+    async () => {
+      removeTimePicker();
+      return true;
+    },
+    async () => true,
+    async () => {
+      renderDatePicker();
+      return true;
+    },
+    async () => true,
+    async () => true,
+    async () => {
+      removeDatePicker();
+      return true;
+    },
+    async () => {
+      renderOptionSection();
+      return true;
+    },
     async () => true,
     async () => true,
     async () => true,
     async () => true,
     async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
-    async () => true,
+  );
+}
+
+interface TestDateParts {
+  year: number;
+  month: number;
+  day: number;
+  isoDate: string;
+}
+
+function getTodayParts(): TestDateParts {
+  const date = new Date();
+  return buildDateParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+
+function addYearsClamped(date: TestDateParts, years: number): TestDateParts {
+  const targetYear = date.year + years;
+  const maxDay = new Date(targetYear, date.month, 0).getDate();
+  return buildDateParts(targetYear, date.month, Math.min(date.day, maxDay));
+}
+
+function buildDateParts(year: number, month: number, day: number): TestDateParts {
+  const paddedMonth = String(month).padStart(2, "0");
+  const paddedDay = String(day).padStart(2, "0");
+  return {
+    year,
+    month,
+    day,
+    isoDate: `${year}-${paddedMonth}-${paddedDay}`,
+  };
+}
+
+function renderDatePicker(): void {
+  removeDatePicker();
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `
+      <div id="testDatePicker">
+        <div>일 월 화 수 목 금 토</div>
+        <button type="button">1</button>
+      </div>
+    `,
+  );
+}
+
+function removeDatePicker(): void {
+  document.querySelector("#testDatePicker")?.remove();
+}
+
+function renderTimePicker(date: TestDateParts): void {
+  removeTimePicker();
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `
+      <div id="testTimePicker">
+        <strong>${date.isoDate}</strong>
+        <button type="button">19:00</button>
+      </div>
+    `,
+  );
+}
+
+function removeTimePicker(): void {
+  document.querySelector("#testTimePicker")?.remove();
+}
+
+function renderOptionSection(): void {
+  document.querySelector("#optionSection")?.remove();
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `
+      <section id="optionSection">
+        <strong>옵션</strong>
+        <label>설정함</label>
+        <input type="text" />
+      </section>
+    `,
   );
 }
 

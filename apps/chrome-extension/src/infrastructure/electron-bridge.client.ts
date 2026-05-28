@@ -40,6 +40,9 @@ type BridgeCommandResultPayload = {
   response: unknown;
 };
 
+const COMMAND_POLL_WAIT_MS = 25_000;
+const BRIDGE_RETRY_DELAY_MS = 2_000;
+
 export class ElectronBridgeClient {
   private readonly clientId = crypto.randomUUID();
 
@@ -89,12 +92,17 @@ export class ElectronBridgeClient {
   }
 
   private async tick(): Promise<void> {
-    if (!this.started || this.inFlight || !this.gateway.isSellerCenterSurface()) {
-      this.scheduleNextTick();
+    if (!this.started || this.inFlight) {
+      return;
+    }
+
+    if (!this.gateway.isSellerCenterSurface()) {
+      this.scheduleNextTick(BRIDGE_RETRY_DELAY_MS);
       return;
     }
 
     this.inFlight = true;
+    let nextDelayMs = 0;
 
     try {
       await this.sendHeartbeat();
@@ -128,23 +136,32 @@ export class ElectronBridgeClient {
         this.stop();
       } else if (isBridgeUnavailableError(error)) {
         this.logBridgeUnavailable(error);
+        nextDelayMs = BRIDGE_RETRY_DELAY_MS;
       } else {
         this.logger.warn("Electron bridge poll failed", toLogMetadata(error));
+        nextDelayMs = BRIDGE_RETRY_DELAY_MS;
       }
     } finally {
       this.inFlight = false;
-      this.scheduleNextTick();
+      this.scheduleNextTick(nextDelayMs);
     }
   }
 
-  private scheduleNextTick(): void {
+  private scheduleNextTick(delayMs = 0): void {
     if (!this.started) {
+      return;
+    }
+
+    if (delayMs <= 0) {
+      this.windowRef.queueMicrotask(() => {
+        void this.tick();
+      });
       return;
     }
 
     this.timerId = this.windowRef.setTimeout(() => {
       void this.tick();
-    }, 2_000);
+    }, delayMs);
   }
 
   private async sendHeartbeat(): Promise<void> {
@@ -166,7 +183,7 @@ export class ElectronBridgeClient {
 
   private async pollCommand(): Promise<BridgeCommandPollResponse["command"]> {
     const result = await fetchJson<BridgeCommandPollResponse>(
-      `${this.bridgeUrl}/bridge/commands?clientId=${encodeURIComponent(this.clientId)}`,
+      `${this.bridgeUrl}/bridge/commands?clientId=${encodeURIComponent(this.clientId)}&waitMs=${COMMAND_POLL_WAIT_MS}`,
     );
     return result.command;
   }

@@ -138,6 +138,63 @@ describe('HybridBridgeServer', () => {
     expect(expiredState.lastCommand?.message).toContain('3초');
   });
 
+  it('keeps a hidden seller-center tab connected through normal background timer delays', async () => {
+    server = new HybridBridgeServer({
+      extensionBuildPath: process.cwd(),
+      chromeExtensionsUrl: 'chrome://extensions',
+      sellerCenterUrl,
+      port: 0,
+    });
+    await server.start();
+
+    const serverUrl = server.getState().serverUrl;
+    await postHeartbeat(serverUrl, {
+      clientId: 'product-list-tab',
+      pageUrl: sellerCenterUrl,
+      pageTitle: '상품 조회/수정',
+      visibilityState: 'hidden',
+      hasFocus: false,
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 30_000));
+
+    const hiddenState = server.getState();
+    expect(hiddenState.connected).toBe(true);
+    expect(hiddenState.activeClientId).toBe('product-list-tab');
+  });
+
+  it('releases a background tab long-poll as soon as a command is queued', async () => {
+    server = new HybridBridgeServer({
+      extensionBuildPath: process.cwd(),
+      chromeExtensionsUrl: 'chrome://extensions',
+      sellerCenterUrl,
+      port: 0,
+    });
+    await server.start();
+
+    const serverUrl = server.getState().serverUrl;
+    await postHeartbeat(serverUrl, {
+      clientId: 'product-list-tab',
+      pageUrl: sellerCenterUrl,
+      pageTitle: '상품 조회/수정',
+      visibilityState: 'hidden',
+      hasFocus: false,
+    });
+
+    const pollPromise = pollCommand(serverUrl, 'product-list-tab', 30_000);
+    await delay(25);
+
+    const queued = server.enqueueCommand('collect-targets');
+
+    await expect(pollPromise).resolves.toMatchObject({
+      command: {
+        commandId: queued.commandId,
+        type: 'collect-targets',
+      },
+    });
+  });
+
   it('fails a product load command when its Chrome extension client disconnects', async () => {
     server = new HybridBridgeServer({
       extensionBuildPath: process.cwd(),
@@ -165,7 +222,7 @@ describe('HybridBridgeServer', () => {
     });
 
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(Date.now() + 6_001));
+    vi.setSystemTime(new Date(Date.now() + 45_001));
 
     const disconnectedState = server.getState();
     expect(disconnectedState.connected).toBe(false);
@@ -195,11 +252,23 @@ async function postHeartbeat(
 async function pollCommand(
   serverUrl: string,
   clientId: string,
+  waitMs?: number,
 ): Promise<unknown> {
+  const query = new URLSearchParams({ clientId });
+  if (waitMs !== undefined) {
+    query.set('waitMs', String(waitMs));
+  }
+
   const response = await fetch(
-    `${serverUrl}/bridge/commands?clientId=${encodeURIComponent(clientId)}`,
+    `${serverUrl}/bridge/commands?${query.toString()}`,
   );
 
   expect(response.ok).toBe(true);
   return response.json();
+}
+
+function delay(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }

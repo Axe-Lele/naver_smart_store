@@ -15,6 +15,27 @@ describe('buildChromeLaunchArgs', () => {
     expect(args.some((arg) => arg.startsWith('--profile-directory='))).toBe(false);
     expect(args.some((arg) => arg.startsWith('--load-extension='))).toBe(false);
     expect(args.some((arg) => arg.startsWith('--disable-extensions-except='))).toBe(false);
+    expect(args.some((arg) => arg.startsWith('--window-size='))).toBe(false);
+    expect(args.some((arg) => arg.startsWith('--window-position='))).toBe(false);
+    expect(args).toContain('--new-window');
+    expect(args.at(-1)).toBe(target);
+  });
+
+  it('supports opening a compact work window for seller-center automation', () => {
+    const target = 'https://sell.smartstore.naver.com/#/products/origin-list';
+    const args = buildChromeLaunchArgs(target, {
+      windowSize: {
+        width: 1000,
+        height: 750,
+      },
+      windowPosition: {
+        x: 896,
+        y: 306,
+      },
+    });
+
+    expect(args).toContain('--window-size=1000,750');
+    expect(args).toContain('--window-position=896,306');
     expect(args).toContain('--new-window');
     expect(args.at(-1)).toBe(target);
   });

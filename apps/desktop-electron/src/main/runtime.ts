@@ -1,7 +1,7 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
 
-import { app, BrowserWindow, clipboard, shell } from 'electron';
+import { app, BrowserWindow, clipboard, screen, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
 import {
   DEFAULT_SMARTSTORE_PRODUCTS_URL,
@@ -31,6 +31,13 @@ import type { RunEvent } from '@smart-store/application';
 
 import { type ChromeLaunchOptions, openUrlInChrome } from './chrome-launcher.js';
 import { HybridBridgeServer } from './hybrid-bridge-server.js';
+
+const COMPACT_CHROME_WINDOW_SIZE = {
+  width: 1000,
+  height: 750,
+} as const;
+
+const COMPACT_CHROME_WINDOW_MARGIN = 24;
 
 export class DesktopRunEventPublisher implements RunEventPublisherPort {
   private readonly history: RunEvent[] = [];
@@ -199,7 +206,9 @@ export class DesktopAppRuntime {
     await this.openChromeTarget(
       settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
       'Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
-      this.createChromeLaunchOptions(),
+      this.createChromeLaunchOptions({
+        compactWorkWindow: true,
+      }),
     );
   }
 
@@ -455,6 +464,8 @@ export class DesktopAppRuntime {
           profileDirectory: options.profileDirectory ?? null,
           extensionPath: options.extensionPath ?? null,
           extensionLoaded: Boolean(options.extensionPath),
+          windowSize: formatChromeWindowSize(options.windowSize),
+          windowPosition: formatChromeWindowPosition(options.windowPosition),
         },
       );
       return;
@@ -469,6 +480,8 @@ export class DesktopAppRuntime {
         userDataDir: options.userDataDir ?? null,
         profileDirectory: options.profileDirectory ?? null,
         extensionPath: options.extensionPath ?? null,
+        windowSize: formatChromeWindowSize(options.windowSize),
+        windowPosition: formatChromeWindowPosition(options.windowPosition),
       },
     );
 
@@ -476,10 +489,48 @@ export class DesktopAppRuntime {
   }
 
   private createChromeLaunchOptions(
-    options: Pick<ChromeLaunchOptions, 'newWindow'> = {},
+    options: Pick<ChromeLaunchOptions, 'newWindow'> & {
+      compactWorkWindow?: boolean;
+    } = {},
   ): ChromeLaunchOptions {
+    const launchOptions: ChromeLaunchOptions = {
+      newWindow: options.newWindow,
+    };
+
+    if (options.compactWorkWindow) {
+      const bounds = this.getCompactChromeWindowBounds();
+      launchOptions.windowSize = {
+        width: bounds.width,
+        height: bounds.height,
+      };
+      launchOptions.windowPosition = {
+        x: bounds.x,
+        y: bounds.y,
+      };
+    }
+
+    return launchOptions;
+  }
+
+  private getCompactChromeWindowBounds(): {
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+  } {
+    const workArea = screen.getPrimaryDisplay().workArea;
+    const width = Math.min(COMPACT_CHROME_WINDOW_SIZE.width, workArea.width);
+    const height = Math.min(COMPACT_CHROME_WINDOW_SIZE.height, workArea.height);
+
     return {
-      ...options,
+      width,
+      height,
+      x:
+        workArea.x +
+        Math.max(0, workArea.width - width - COMPACT_CHROME_WINDOW_MARGIN),
+      y:
+        workArea.y +
+        Math.max(0, workArea.height - height - COMPACT_CHROME_WINDOW_MARGIN),
     };
   }
 
@@ -542,4 +593,16 @@ function isErrorWithSessionStatus(
     'session' in value &&
     typeof (value as { session?: unknown }).session === 'object'
   );
+}
+
+function formatChromeWindowSize(
+  value: ChromeLaunchOptions['windowSize'],
+): string | null {
+  return value ? `${value.width}x${value.height}` : null;
+}
+
+function formatChromeWindowPosition(
+  value: ChromeLaunchOptions['windowPosition'],
+): string | null {
+  return value ? `${value.x},${value.y}` : null;
 }

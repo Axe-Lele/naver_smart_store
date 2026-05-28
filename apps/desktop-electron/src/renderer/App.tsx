@@ -706,7 +706,7 @@ export function App() {
       await window.desktopApi.hybrid.openSellerCenter();
       setNotice({
         tone: 'success',
-        text: '일반 Chrome을 열었습니다. 기존 Chrome 프로필에서 직접 로그인한 뒤 상품 조회/수정 화면을 확인해 주세요.',
+        text: '작업용 작은 Chrome 창을 열었습니다. 기존 Chrome 프로필에서 직접 로그인한 뒤 상품 조회/수정 화면을 확인해 주세요.',
       });
     } catch (error) {
       showError(error);

@@ -18,10 +18,11 @@ import type {
 
 const DEFAULT_BRIDGE_HOST = '127.0.0.1';
 const DEFAULT_BRIDGE_PORT = 45873;
-const CLIENT_STALE_MS = 6_000;
+const CLIENT_STALE_MS = 45_000;
 const CLAIM_STALE_MS = 30_000;
 const DEFAULT_COMMAND_STALE_MS = 90_000;
 const STOP_COMMAND_STALE_MS = 3_000;
+const MAX_COMMAND_POLL_WAIT_MS = 30_000;
 
 type HybridHeartbeatPayload = {
   clientId: string;
@@ -57,6 +58,12 @@ type CommandRecord = HybridBridgeCommandState & {
   claimedAt?: number;
 };
 
+type PendingCommandPoll = {
+  clientId: string;
+  response: ServerResponse;
+  timeoutId: ReturnType<typeof setTimeout>;
+};
+
 export class HybridBridgeServer {
   private server?: Server;
 
@@ -65,6 +72,8 @@ export class HybridBridgeServer {
   private readonly clients = new Map<string, ClientRecord>();
 
   private readonly commands: CommandRecord[] = [];
+
+  private readonly pendingPolls = new Map<string, PendingCommandPoll>();
 
   private lastError?: string;
 
@@ -126,6 +135,8 @@ export class HybridBridgeServer {
     if (!this.server) {
       return;
     }
+
+    this.completeAllPendingPolls();
 
     await new Promise<void>((resolve, reject) => {
       this.server?.close((error) => {
@@ -191,6 +202,7 @@ export class HybridBridgeServer {
     };
 
     this.commands.unshift(command);
+    this.flushPendingPolls();
     return this.toPublicCommandState(command);
   }
 
@@ -215,7 +227,7 @@ export class HybridBridgeServer {
       }
 
       if (request.method === 'GET' && url.pathname === '/bridge/commands') {
-        this.handleCommandPoll(url, response);
+        this.handleCommandPoll(url, request, response);
         return;
       }
 
@@ -272,7 +284,11 @@ export class HybridBridgeServer {
     );
   }
 
-  private handleCommandPoll(url: URL, response: ServerResponse): void {
+  private handleCommandPoll(
+    url: URL,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): void {
     const clientId = url.searchParams.get('clientId');
 
     if (!clientId) {
@@ -282,6 +298,82 @@ export class HybridBridgeServer {
     }
 
     const command = this.claimNextCommand(clientId);
+    if (command) {
+      this.writeCommandPollResponse(response, command);
+      return;
+    }
+
+    const waitMs = parseCommandPollWaitMs(url);
+    if (waitMs <= 0) {
+      this.writeCommandPollResponse(response, null);
+      return;
+    }
+
+    this.registerPendingPoll(clientId, request, response, waitMs);
+  }
+
+  private registerPendingPoll(
+    clientId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+    waitMs: number,
+  ): void {
+    this.completePendingPoll(clientId, null);
+
+    const pending: PendingCommandPoll = {
+      clientId,
+      response,
+      timeoutId: setTimeout(() => {
+        this.completePendingPoll(clientId, null);
+      }, waitMs),
+    };
+
+    this.pendingPolls.set(clientId, pending);
+    request.on('close', () => {
+      if (this.pendingPolls.get(clientId) === pending) {
+        clearTimeout(pending.timeoutId);
+        this.pendingPolls.delete(clientId);
+      }
+    });
+  }
+
+  private flushPendingPolls(): void {
+    for (const clientId of [...this.pendingPolls.keys()]) {
+      const command = this.claimNextCommand(clientId);
+      if (command) {
+        this.completePendingPoll(clientId, command);
+      }
+    }
+  }
+
+  private completePendingPoll(
+    clientId: string,
+    command: CommandRecord | null,
+  ): void {
+    const pending = this.pendingPolls.get(clientId);
+    if (!pending) {
+      return;
+    }
+
+    clearTimeout(pending.timeoutId);
+    this.pendingPolls.delete(clientId);
+    this.writeCommandPollResponse(pending.response, command);
+  }
+
+  private completeAllPendingPolls(): void {
+    for (const clientId of [...this.pendingPolls.keys()]) {
+      this.completePendingPoll(clientId, null);
+    }
+  }
+
+  private writeCommandPollResponse(
+    response: ServerResponse,
+    command: CommandRecord | null,
+  ): void {
+    if (response.writableEnded) {
+      return;
+    }
+
     const payload: HybridCommandPollResponse = {
       command: command
         ? {
@@ -490,6 +582,15 @@ export class HybridBridgeServer {
 
 function getCommandStaleMs(type: HybridCommandType): number {
   return type === 'stop-batch' ? STOP_COMMAND_STALE_MS : DEFAULT_COMMAND_STALE_MS;
+}
+
+function parseCommandPollWaitMs(url: URL): number {
+  const raw = Number(url.searchParams.get('waitMs') ?? 0);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 0;
+  }
+
+  return Math.min(Math.floor(raw), MAX_COMMAND_POLL_WAIT_MS);
 }
 
 function getCommandTimeoutMessage(type: HybridCommandType): string {
