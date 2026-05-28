@@ -130,17 +130,33 @@ async function terminateChromeProcessesForUserDataDir(
   }
 
   const normalizedUserDataDir = path.resolve(userDataDir);
+  const targetLiteral = toPowerShellSingleQuotedString(normalizedUserDataDir);
   const script = [
-    '$target = [System.IO.Path]::GetFullPath($args[0]).TrimEnd("\\")',
-    'Get-CimInstance Win32_Process -Filter "Name = \'chrome.exe\'" |',
-    '  Where-Object {',
+    `$target = [System.IO.Path]::GetFullPath(${targetLiteral}).TrimEnd("\\")`,
+    '$deadline = (Get-Date).AddMilliseconds(3000)',
+    '$argumentPattern = \'(?i)--user-data-dir=(?:"([^"]+)"|([^\\s]+))\'',
+    'do {',
+    '  $chromeProcesses = @(Get-CimInstance Win32_Process -Filter "Name = \'chrome.exe\'" | Where-Object {',
     '    $cmd = $_.CommandLine',
-    '    $cmd -and (',
-    '      $cmd.Contains("--user-data-dir=$target") -or',
-    '      $cmd.Contains("--user-data-dir=`"$target`"")',
-    '    )',
-    '  } |',
-    '  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
+    '    if (-not $cmd) { $false } else {',
+    '    $match = [regex]::Match($cmd, $argumentPattern)',
+    '    if (-not $match.Success) { $false } else {',
+    '    $raw = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }',
+    '    try {',
+    '      $candidate = [System.IO.Path]::GetFullPath($raw).TrimEnd("\\")',
+    '    } catch {',
+    '      $candidate = $raw.TrimEnd("\\")',
+    '    }',
+    '    [System.StringComparer]::OrdinalIgnoreCase.Equals($candidate, $target)',
+    '    }',
+    '    }',
+    '  })',
+    '  foreach ($process in $chromeProcesses) {',
+    '    Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue',
+    '  }',
+    '  if ($chromeProcesses.Count -eq 0) { break }',
+    '  Start-Sleep -Milliseconds 100',
+    '} while ((Get-Date) -lt $deadline)',
   ].join('\n');
 
   try {
@@ -150,12 +166,15 @@ async function terminateChromeProcessesForUserDataDir(
       'Bypass',
       '-Command',
       script,
-      normalizedUserDataDir,
     ]);
   } catch {
     // Best effort: a running dedicated Chrome profile may ignore --load-extension.
     // If closing fails, Chrome can still open and the UI will surface connection state.
   }
+}
+
+function toPowerShellSingleQuotedString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 export function buildChromeLaunchArgs(

@@ -207,6 +207,7 @@ export class DesktopAppRuntime {
         userDataDir: this.getDefaultChromeUserDataDir(),
         profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
         extensionPath: this.getChromeExtensionPath(),
+        disableExtensionsExcept: true,
         restartExistingUserDataDir: true,
       }),
     );
@@ -223,6 +224,7 @@ export class DesktopAppRuntime {
         userDataDir,
         profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
         extensionPath: this.getChromeExtensionPath(),
+        disableExtensionsExcept: true,
         restartExistingUserDataDir: true,
       }),
     );
@@ -511,6 +513,7 @@ export class DesktopAppRuntime {
       | 'userDataDir'
       | 'profileDirectory'
       | 'extensionPath'
+      | 'disableExtensionsExcept'
       | 'restartExistingUserDataDir'
     > & {
       compactWorkWindow?: boolean;
@@ -521,6 +524,7 @@ export class DesktopAppRuntime {
       userDataDir: options.userDataDir,
       profileDirectory: options.profileDirectory,
       extensionPath: options.extensionPath,
+      disableExtensionsExcept: options.disableExtensionsExcept,
       restartExistingUserDataDir: options.restartExistingUserDataDir,
     };
 

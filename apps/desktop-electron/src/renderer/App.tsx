@@ -733,7 +733,7 @@ export function App() {
       setNotice({
         tone: 'success',
         text:
-          '확장 폴더 경로를 복사하고 작업용 Chrome 확장 관리 화면을 열었습니다. 자동 로드가 보이지 않으면 압축해제된 확장 프로그램 로드로 열린 폴더를 선택해 주세요.',
+          '작업용 Chrome을 다시 열고 번들 확장을 자동 로드했습니다. 직접 로드가 필요하면 복사된 폴더 경로 자체를 선택해 주세요.',
       });
     } catch (error) {
       showError(error);
