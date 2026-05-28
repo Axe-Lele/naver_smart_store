@@ -44,6 +44,7 @@ export type ChromeLaunchOptions = {
   profileDirectory?: string;
   extensionPath?: string;
   disableExtensionsExcept?: boolean;
+  restartExistingUserDataDir?: boolean;
 };
 
 export async function resolveChromeExecutablePath(): Promise<string | null> {
@@ -100,6 +101,10 @@ export async function openUrlInChrome(
     fs.mkdirSync(options.userDataDir, { recursive: true });
   }
 
+  if (options.restartExistingUserDataDir && options.userDataDir) {
+    await terminateChromeProcessesForUserDataDir(options.userDataDir);
+  }
+
   await new Promise<void>((resolve, reject) => {
     const child = spawn(chromePath, buildChromeLaunchArgs(target, options), {
       detached: true,
@@ -115,6 +120,42 @@ export async function openUrlInChrome(
   });
 
   return chromePath;
+}
+
+async function terminateChromeProcessesForUserDataDir(
+  userDataDir: string,
+): Promise<void> {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  const normalizedUserDataDir = path.resolve(userDataDir);
+  const script = [
+    '$target = [System.IO.Path]::GetFullPath($args[0]).TrimEnd("\\")',
+    'Get-CimInstance Win32_Process -Filter "Name = \'chrome.exe\'" |',
+    '  Where-Object {',
+    '    $cmd = $_.CommandLine',
+    '    $cmd -and (',
+    '      $cmd.Contains("--user-data-dir=$target") -or',
+    '      $cmd.Contains("--user-data-dir=`"$target`"")',
+    '    )',
+    '  } |',
+    '  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
+  ].join('\n');
+
+  try {
+    await execFileAsync('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      script,
+      normalizedUserDataDir,
+    ]);
+  } catch {
+    // Best effort: a running dedicated Chrome profile may ignore --load-extension.
+    // If closing fails, Chrome can still open and the UI will surface connection state.
+  }
 }
 
 export function buildChromeLaunchArgs(

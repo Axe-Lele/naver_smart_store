@@ -29,6 +29,7 @@ describe('buildChromeLaunchArgs', () => {
       userDataDir,
       profileDirectory: 'Default',
       extensionPath,
+      restartExistingUserDataDir: true,
       windowSize: {
         width: 1000,
         height: 750,
