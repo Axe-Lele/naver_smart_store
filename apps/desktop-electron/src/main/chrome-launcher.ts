@@ -31,6 +31,7 @@ const WINDOWS_CHROME_APP_PATH_REGISTRY_KEYS = [
 ] as const;
 
 export type ChromeLaunchOptions = {
+  executablePath?: string;
   newWindow?: boolean;
   windowSize?: {
     width: number;
@@ -92,7 +93,9 @@ export async function openUrlInChrome(
   target: string,
   options: ChromeLaunchOptions = {},
 ): Promise<string | null> {
-  const chromePath = await resolveChromeExecutablePath();
+  const chromePath = options.executablePath
+    ? normalizeChromeExecutablePath(options.executablePath)
+    : await resolveChromeExecutablePath();
   if (!chromePath) {
     return null;
   }
@@ -168,8 +171,8 @@ async function terminateChromeProcessesForUserDataDir(
       script,
     ]);
   } catch {
-    // Best effort: a running dedicated Chrome profile may ignore --load-extension.
-    // If closing fails, Chrome can still open and the UI will surface connection state.
+    // Best effort: a running dedicated browser profile may ignore launch switches.
+    // If closing fails, the UI will still surface connection state.
   }
 }
 

@@ -1,6 +1,6 @@
 // File: apps/desktop-electron/src/main/runtime.ts
 import path from 'node:path';
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 
 import { app, BrowserWindow, clipboard, screen, shell } from 'electron';
 import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/application';
@@ -40,6 +40,10 @@ const COMPACT_CHROME_WINDOW_SIZE = {
 
 const COMPACT_CHROME_WINDOW_MARGIN = 24;
 const DEDICATED_CHROME_PROFILE_DIRECTORY = 'Default';
+const PLAYWRIGHT_CHROMIUM_EXECUTABLE_SEGMENTS = [
+  'chrome-win64',
+  'chrome.exe',
+] as const;
 
 export class DesktopRunEventPublisher implements RunEventPublisherPort {
   private readonly history: RunEvent[] = [];
@@ -78,6 +82,8 @@ export class DesktopAppRuntime {
 
   private readonly extensionBuildPath: string;
 
+  private readonly workBrowserExecutablePath: string | undefined;
+
   private readonly storageStateRepository = new FileStorageStateRepository();
 
   private readonly eventPublisher: DesktopRunEventPublisher;
@@ -115,6 +121,7 @@ export class DesktopAppRuntime {
       ? path.join(process.resourcesPath, 'chrome-extension')
       : path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
     this.extensionBuildPath = this.prepareRuntimeChromeExtensionPath();
+    this.workBrowserExecutablePath = this.resolveBundledChromiumExecutablePath();
     this.hybridBridgeServer = new HybridBridgeServer({
       extensionBuildPath: this.extensionBuildPath,
       chromeExtensionsUrl: 'chrome://extensions',
@@ -129,7 +136,7 @@ export class DesktopAppRuntime {
           this.authDir,
           'smartstore-storage-state.json',
         ),
-        userDataDir: this.getDefaultChromeUserDataDir(),
+        userDataDir: this.getDefaultWorkBrowserUserDataDir(),
         outputDir,
         headless: false,
         delayMs: 1_500,
@@ -199,15 +206,16 @@ export class DesktopAppRuntime {
   }
 
   async openChromeExtensions(): Promise<void> {
+    const executablePath = this.requireWorkBrowserExecutablePath();
     await this.openChromeTarget(
       'chrome://extensions',
-      'Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
+      '작업용 브라우저 실행 파일을 찾지 못했습니다. 설치 파일을 다시 설치해 주세요.',
       this.createChromeLaunchOptions({
         newWindow: false,
-        userDataDir: this.getDefaultChromeUserDataDir(),
+        executablePath,
+        userDataDir: this.getDefaultWorkBrowserUserDataDir(),
         profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
         extensionPath: this.getChromeExtensionPath(),
-        disableExtensionsExcept: true,
         restartExistingUserDataDir: true,
       }),
     );
@@ -215,16 +223,16 @@ export class DesktopAppRuntime {
 
   async openSellerCenter(): Promise<void> {
     const settings = await this.orchestrator.settingsStore.loadSettings();
-    const userDataDir = settings.userDataDir ?? this.getDefaultChromeUserDataDir();
+    const executablePath = this.requireWorkBrowserExecutablePath();
     await this.openChromeTarget(
       settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
-      'Chrome 실행 파일을 찾지 못했습니다. Chrome 설치 경로를 확인해 주세요.',
+      '작업용 브라우저 실행 파일을 찾지 못했습니다. 설치 파일을 다시 설치해 주세요.',
       this.createChromeLaunchOptions({
         compactWorkWindow: true,
-        userDataDir,
+        executablePath,
+        userDataDir: this.getDefaultWorkBrowserUserDataDir(),
         profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
         extensionPath: this.getChromeExtensionPath(),
-        disableExtensionsExcept: true,
         restartExistingUserDataDir: true,
       }),
     );
@@ -466,14 +474,14 @@ export class DesktopAppRuntime {
       chromePath = await openUrlInChrome(target, options);
     } catch (error) {
       throw new Error(
-        `Chrome 실행에 실패했습니다.${error instanceof Error ? `\n\n${error.message}` : ''}`,
+        `작업용 브라우저 실행에 실패했습니다.${error instanceof Error ? `\n\n${error.message}` : ''}`,
       );
     }
 
     if (chromePath) {
       await this.publishLog(
         'info',
-        'Opened Chrome workspace.',
+        'Opened work browser workspace.',
         undefined,
         {
           chromePath,
@@ -491,7 +499,7 @@ export class DesktopAppRuntime {
 
     await this.publishLog(
       'error',
-      'Could not resolve a local Google Chrome executable. Chrome was not opened.',
+      'Could not resolve a work browser executable. Browser was not opened.',
       undefined,
       {
         target,
@@ -509,11 +517,11 @@ export class DesktopAppRuntime {
   private createChromeLaunchOptions(
     options: Pick<
       ChromeLaunchOptions,
+      | 'executablePath'
       | 'newWindow'
       | 'userDataDir'
       | 'profileDirectory'
       | 'extensionPath'
-      | 'disableExtensionsExcept'
       | 'restartExistingUserDataDir'
     > & {
       compactWorkWindow?: boolean;
@@ -521,10 +529,10 @@ export class DesktopAppRuntime {
   ): ChromeLaunchOptions {
     const launchOptions: ChromeLaunchOptions = {
       newWindow: options.newWindow,
+      executablePath: options.executablePath,
       userDataDir: options.userDataDir,
       profileDirectory: options.profileDirectory,
       extensionPath: options.extensionPath,
-      disableExtensionsExcept: options.disableExtensionsExcept,
       restartExistingUserDataDir: options.restartExistingUserDataDir,
     };
 
@@ -543,8 +551,8 @@ export class DesktopAppRuntime {
     return launchOptions;
   }
 
-  private getDefaultChromeUserDataDir(): string {
-    return path.join(this.authDir, 'chrome-profile');
+  private getDefaultWorkBrowserUserDataDir(): string {
+    return path.join(this.authDir, 'work-browser-profile');
   }
 
   private getChromeExtensionPath(): string | undefined {
@@ -573,6 +581,46 @@ export class DesktopAppRuntime {
     } catch {
       return this.bundledExtensionBuildPath;
     }
+  }
+
+  private resolveBundledChromiumExecutablePath(): string | undefined {
+    const runtimeRoot = app.isPackaged
+      ? path.join(process.resourcesPath, 'playwright-runtime')
+      : path.join(process.cwd(), '.playwright-browsers');
+
+    if (!existsSync(runtimeRoot)) {
+      return undefined;
+    }
+
+    const chromiumDirs = readdirSync(runtimeRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('chromium-'))
+      .map((entry) => entry.name)
+      .sort()
+      .reverse();
+
+    for (const directoryName of chromiumDirs) {
+      const executablePath = path.join(
+        runtimeRoot,
+        directoryName,
+        ...PLAYWRIGHT_CHROMIUM_EXECUTABLE_SEGMENTS,
+      );
+
+      if (existsSync(executablePath)) {
+        return executablePath;
+      }
+    }
+
+    return undefined;
+  }
+
+  private requireWorkBrowserExecutablePath(): string {
+    if (!this.workBrowserExecutablePath) {
+      throw new Error(
+        '작업용 브라우저 실행 파일을 찾지 못했습니다. 설치 파일을 다시 설치해 주세요.',
+      );
+    }
+
+    return this.workBrowserExecutablePath;
   }
 
   private getCompactChromeWindowBounds(): {

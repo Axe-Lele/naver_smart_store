@@ -957,7 +957,7 @@ button {
 }
 
 .operator-status-cluster .status-badge[data-value="탭 연결 대기"]::before,
-.operator-status-cluster .status-badge[data-value="Chrome 대기"]::before {
+.operator-status-cluster .status-badge[data-value="브라우저 대기"]::before {
   background: #d6a740;
 }
 

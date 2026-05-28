@@ -595,28 +595,28 @@ function parseCommandPollWaitMs(url: URL): number {
 
 function getCommandTimeoutMessage(type: HybridCommandType): string {
   if (type === 'stop-batch') {
-    return '중단 요청에 3초 동안 응답이 없습니다. 확장프로그램이 꺼졌거나 Chrome 탭 연결이 끊겼을 수 있습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.';
+    return '중단 요청에 3초 동안 응답이 없습니다. 확장프로그램이 꺼졌거나 작업용 브라우저 탭 연결이 끊겼을 수 있습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.';
   }
 
-  return 'Chrome 탭이 요청에 응답하지 않았습니다. 판매자센터 상품 목록 탭을 새로고침한 뒤 다시 실행해 주세요.';
+  return '작업용 브라우저 탭이 요청에 응답하지 않았습니다. 판매자센터 상품 목록 탭을 새로고침한 뒤 다시 실행해 주세요.';
 }
 
 function getCommandDisconnectedMessage(type: HybridCommandType): string {
   if (type === 'collect-targets') {
-    return '상품 불러오기를 취소했습니다. Chrome 확장 연결이 끊겼습니다. 판매자센터 상품 조회/수정 탭을 새로고침한 뒤 다시 불러와 주세요.';
+    return '상품 불러오기를 취소했습니다. 브라우저 확장 연결이 끊겼습니다. 판매자센터 상품 조회/수정 탭을 새로고침한 뒤 다시 불러와 주세요.';
   }
 
   if (type === 'stop-batch') {
-    return '중단 요청을 취소했습니다. Chrome 확장 연결이 끊겼습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.';
+    return '중단 요청을 취소했습니다. 브라우저 확장 연결이 끊겼습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.';
   }
 
-  return '요청을 취소했습니다. Chrome 확장 연결이 끊겼습니다. 판매자센터 탭을 새로고침한 뒤 다시 실행해 주세요.';
+  return '요청을 취소했습니다. 브라우저 확장 연결이 끊겼습니다. 판매자센터 탭을 새로고침한 뒤 다시 실행해 주세요.';
 }
 
 function describeHybridCommand(type: HybridCommandType): string {
   switch (type) {
     case 'check-surface':
-      return '현재 Chrome 탭이 판매자센터 작업 표면인지 확인합니다.';
+      return '현재 작업용 브라우저 탭이 판매자센터 작업 표면인지 확인합니다.';
     case 'run-dom-inspection':
       return '현재 판매자센터 DOM 구조를 점검합니다.';
     case 'collect-targets':
@@ -634,14 +634,14 @@ function describeHybridCommand(type: HybridCommandType): string {
 
 function getMissingTargetMessage(type: HybridCommandType): string {
   if (requiresProductListClient(type)) {
-    return 'Chrome 판매자센터 상품 조회/수정 탭이 연결되어 있지 않습니다. 상품 목록 탭을 열고 Ctrl+R로 새로고침한 뒤 다시 실행해 주세요.';
+    return '작업용 브라우저 판매자센터 상품 조회/수정 탭이 연결되어 있지 않습니다. 상품 목록 탭을 열고 Ctrl+R로 새로고침한 뒤 다시 실행해 주세요.';
   }
 
   if (requiresProductWorkClient(type)) {
-    return 'Chrome 판매자센터 상품 탭이 연결되어 있지 않습니다. 상품 목록 또는 상품 수정 탭을 열고 Ctrl+R로 새로고침한 뒤 다시 실행해 주세요.';
+    return '작업용 브라우저 판매자센터 상품 탭이 연결되어 있지 않습니다. 상품 목록 또는 상품 수정 탭을 열고 Ctrl+R로 새로고침한 뒤 다시 실행해 주세요.';
   }
 
-  return 'Chrome 판매자센터 탭이 연결되어 있지 않습니다. 판매자센터 탭을 열고 Ctrl+R로 새로고침한 뒤 다시 실행해 주세요.';
+  return '작업용 브라우저 판매자센터 탭이 연결되어 있지 않습니다. 판매자센터 탭을 열고 Ctrl+R로 새로고침한 뒤 다시 실행해 주세요.';
 }
 
 function requiresProductListClient(type: HybridCommandType): boolean {

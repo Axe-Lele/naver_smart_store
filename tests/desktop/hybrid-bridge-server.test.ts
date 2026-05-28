@@ -232,7 +232,7 @@ describe('HybridBridgeServer', () => {
       status: 'FAILED',
     });
     expect(disconnectedState.lastCommand?.message).toContain('상품 불러오기를 취소했습니다');
-    expect(disconnectedState.lastCommand?.message).toContain('Chrome 확장 연결이 끊겼습니다');
+    expect(disconnectedState.lastCommand?.message).toContain('브라우저 확장 연결이 끊겼습니다');
   });
 });
 

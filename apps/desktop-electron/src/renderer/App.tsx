@@ -162,11 +162,11 @@ export function App() {
         ? '중단됨'
         : `${completedCount} / ${targetCount} 완료`;
   const progressDetailText = isCollectingProducts
-    ? 'Chrome 탭에서 현재 페이지 상품을 읽고 있습니다.'
+    ? '작업용 브라우저 탭에서 현재 페이지 상품을 읽고 있습니다.'
     : isStartingBatch
-      ? '선택한 상품 작업을 Chrome 탭으로 보내고 있습니다.'
+      ? '선택한 상품 작업을 작업용 브라우저 탭으로 보내고 있습니다.'
     : isStoppingBatch
-      ? 'Chrome 탭에 중단 요청을 보내고 있습니다.'
+      ? '작업용 브라우저 탭에 중단 요청을 보내고 있습니다.'
       : isStopped
         ? '작업이 중단되었습니다. 다시 실행하면 남은 상품부터 처리합니다.'
         : activeProgress
@@ -206,7 +206,7 @@ export function App() {
       ...eventHistory.map((event, index) => toRunEventLogEntry(event, index)),
       ...(activeProgress?.logs ?? []).map((log, index) => ({
         id: `progress-${log.timestamp}-${index}`,
-        source: 'Chrome 확장',
+        source: '브라우저 확장',
         level: toLogLevelLabel(log.level),
         tone: toLogTone(log.level),
         createdAt: log.timestamp,
@@ -353,7 +353,7 @@ export function App() {
       await refreshHybridState();
       setNotice({
         tone: 'info',
-        text: '작업용 Chrome을 열고 전용 프로필에서 직접 로그인한 뒤, 상품 조회/수정 화면에서 상품 불러오기를 누르면 됩니다.',
+        text: '작업용 브라우저를 열고 전용 프로필에서 직접 로그인한 뒤, 상품 조회/수정 화면에서 상품 불러오기를 누르면 됩니다.',
       });
     } catch (error) {
       showError(error);
@@ -411,7 +411,7 @@ export function App() {
       setNotice({
         tone: 'info',
         text: queued.targetClientId
-          ? `${describeHybridCommand(type)} 요청을 Chrome 탭으로 보냈습니다.`
+          ? `${describeHybridCommand(type)} 요청을 작업용 브라우저 탭으로 보냈습니다.`
           : '판매자센터 탭이 연결되면 요청이 자동으로 전달됩니다.',
       });
       return queued;
@@ -446,7 +446,7 @@ export function App() {
       setPendingCommand((current) => (current === type ? null : current));
       setNotice({
         tone: 'error',
-        text: '중단 요청에 3초 동안 응답이 없습니다. 확장프로그램이 꺼졌거나 Chrome 탭 연결이 끊겼을 수 있습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.',
+        text: '중단 요청에 3초 동안 응답이 없습니다. 확장프로그램이 꺼졌거나 작업용 브라우저 탭 연결이 끊겼을 수 있습니다. 판매자센터 탭을 새로고침한 뒤 상태를 확인해 주세요.',
       });
       void refreshHybridState();
     }, STOP_COMMAND_TIMEOUT_MS);
@@ -488,14 +488,14 @@ export function App() {
     if (isLoginPage) {
       setNotice({
         tone: 'error',
-        text: 'Chrome 탭이 아직 로그인 화면입니다. 판매자센터 로그인을 끝낸 뒤 상품 조회/수정 화면에서 다시 눌러 주세요.',
+        text: '작업용 브라우저 탭이 아직 로그인 화면입니다. 판매자센터 로그인을 끝낸 뒤 상품 조회/수정 화면에서 다시 눌러 주세요.',
       });
       return;
     }
 
     setNotice({
       tone: 'info',
-      text: 'Chrome 판매자센터 화면에서 상품을 읽고 있습니다. 잠시만 기다려 주세요.',
+      text: '작업용 브라우저 판매자센터 화면에서 상품을 읽고 있습니다. 잠시만 기다려 주세요.',
     });
     await sendHybridCommand('collect-targets');
   }
@@ -689,8 +689,8 @@ export function App() {
       setNotice({
         tone: 'error',
         text: isCurrentLoginPage
-          ? `${prefix} Chrome에서 로그인을 끝낸 뒤 상품 조회/수정 화면을 열어 주세요.`
-          : `${prefix} Chrome의 상품 조회/수정 탭을 열고 Ctrl+R로 새로고침해 주세요.`,
+          ? `${prefix} 작업용 브라우저에서 로그인을 끝낸 뒤 상품 조회/수정 화면을 열어 주세요.`
+          : `${prefix} 작업용 브라우저의 상품 조회/수정 탭을 열고 Ctrl+R로 새로고침해 주세요.`,
       });
       return false;
     } catch (error) {
@@ -706,7 +706,7 @@ export function App() {
       await window.desktopApi.hybrid.openSellerCenter();
       setNotice({
         tone: 'success',
-        text: '작업용 Chrome 창을 열었습니다. 앱 전용 프로필에서 직접 로그인한 뒤 상품 조회/수정 화면을 확인해 주세요.',
+        text: '작업용 브라우저 창을 열었습니다. 앱 전용 프로필에서 직접 로그인한 뒤 상품 조회/수정 화면을 확인해 주세요.',
       });
     } catch (error) {
       showError(error);
@@ -733,7 +733,7 @@ export function App() {
       setNotice({
         tone: 'success',
         text:
-          '작업용 Chrome을 다시 열고 번들 확장을 자동 로드했습니다. 직접 로드가 필요하면 복사된 폴더 경로 자체를 선택해 주세요.',
+          '작업용 브라우저를 다시 열고 번들 확장을 자동 로드했습니다. 직접 로드가 필요하면 복사된 폴더 경로 자체를 선택해 주세요.',
       });
     } catch (error) {
       showError(error);
@@ -790,7 +790,7 @@ export function App() {
           <VersionPill version={appInfo.version} packaged={appInfo.packaged} />
         </div>
         <div className="operator-header-actions">
-          <div className="operator-status-cluster" aria-label="Chrome 연결 상태">
+          <div className="operator-status-cluster" aria-label="브라우저 연결 상태">
             <StatusBadge value={connectionLabel} tone="session" />
             <StatusBadge value={chromePageLabel} tone="session" />
           </div>
@@ -799,7 +799,7 @@ export function App() {
             className="secondary-button"
             onClick={() => void handleOpenSellerCenter()}
           >
-            작업용 Chrome
+            작업용 브라우저
           </button>
           <button
             type="button"
@@ -997,7 +997,7 @@ export function App() {
             <details className="side-details">
               <summary>사용 순서</summary>
               <ol className="simple-step-list">
-                <li>작업용 Chrome에서 로그인합니다.</li>
+                <li>작업용 브라우저에서 로그인합니다.</li>
                 <li>묶음배송 검색 결과를 엽니다.</li>
                 <li>현재 페이지 상품을 불러옵니다.</li>
                 <li>제외할 상품 체크를 풉니다.</li>
@@ -1077,7 +1077,7 @@ export function App() {
             <section className="side-card compact-side-card">
               <h2>연결되지 않을 때</h2>
               <p className="muted">
-                작업용 Chrome은 앱 전용 프로필과 번들 확장을 사용합니다. 연결되지 않으면 상품 조회/수정 탭을 Ctrl+R로 새로고침하세요.
+                작업용 브라우저는 앱 전용 프로필과 번들 확장을 사용합니다. 연결되지 않으면 상품 조회/수정 탭을 Ctrl+R로 새로고침하세요.
               </p>
               <div className="side-button-stack">
                 <button
@@ -1100,7 +1100,7 @@ export function App() {
                 <p className="eyebrow">운영 로그</p>
                 <h1>로그</h1>
                 <p className="muted">
-                  앱 이벤트와 Chrome 확장 진행 로그를 최신순으로 모아 확인합니다.
+                  앱 이벤트와 브라우저 확장 진행 로그를 최신순으로 모아 확인합니다.
                 </p>
               </div>
               <button
@@ -1440,7 +1440,7 @@ function toOperatorMessage(message?: string): string {
   if (value.includes('seller center') || value.includes('판매자센터')) {
     return value.includes('Chrome')
       ? value
-      : 'Chrome에서 스마트스토어 판매자센터 상품 조회/수정 화면을 열어 주세요.';
+      : '작업용 브라우저에서 스마트스토어 판매자센터 상품 조회/수정 화면을 열어 주세요.';
   }
 
   if (value.includes('Edit URL') || value.includes('수정 화면')) {
@@ -1448,7 +1448,7 @@ function toOperatorMessage(message?: string): string {
   }
 
   if (value.includes('Target page') || value.includes('frame was detached')) {
-    return 'Chrome 탭이 새로고침되거나 이동하면서 연결이 끊겼습니다. 판매자센터 화면을 다시 열고 상품 불러오기를 다시 눌러 주세요.';
+    return '작업용 브라우저 탭이 새로고침되거나 이동하면서 연결이 끊겼습니다. 판매자센터 화면을 다시 열고 상품 불러오기를 다시 눌러 주세요.';
   }
 
   if (value.includes('verification required')) {

@@ -23,9 +23,17 @@ describe('buildChromeLaunchArgs', () => {
 
   it('supports opening a compact dedicated-profile work window for seller-center automation', () => {
     const target = 'https://sell.smartstore.naver.com/#/products/origin-list';
+    const executablePath = path.join(
+      process.cwd(),
+      '.playwright-browsers',
+      'chromium-1217',
+      'chrome-win64',
+      'chrome.exe',
+    );
     const userDataDir = path.join(process.cwd(), '.auth', 'chrome-profile');
     const extensionPath = path.join(process.cwd(), 'dist', 'apps', 'chrome-extension');
     const args = buildChromeLaunchArgs(target, {
+      executablePath,
       userDataDir,
       profileDirectory: 'Default',
       extensionPath,
@@ -41,6 +49,7 @@ describe('buildChromeLaunchArgs', () => {
     });
 
     expect(args).toContain(`--user-data-dir=${path.resolve(userDataDir)}`);
+    expect(args.some((arg) => arg.startsWith('--executablePath='))).toBe(false);
     expect(args).toContain('--profile-directory=Default');
     expect(args).not.toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
