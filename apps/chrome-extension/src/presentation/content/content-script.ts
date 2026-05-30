@@ -422,7 +422,7 @@ async function executeBridgeCommand(
         ok: !collected.verificationRequired,
         message: collected.verificationRequired
           ? collected.note
-          : `상품 ${collected.products.length}건을 불러왔습니다.`,
+          : `전체 페이지에서 상품 ${collected.products.length}건을 불러왔습니다.`,
         progress,
         details: {
           targetCount: collected.products.length,

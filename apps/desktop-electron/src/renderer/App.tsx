@@ -162,7 +162,7 @@ export function App() {
         ? '중단됨'
         : `${completedCount} / ${targetCount} 완료`;
   const progressDetailText = isCollectingProducts
-    ? '작업용 브라우저 탭에서 현재 페이지 상품을 읽고 있습니다.'
+    ? '작업용 브라우저 탭에서 검색 결과 전체 페이지 상품을 읽고 있습니다.'
     : isStartingBatch
       ? '선택한 상품 작업을 작업용 브라우저 탭으로 보내고 있습니다.'
     : isStoppingBatch
@@ -313,7 +313,7 @@ export function App() {
         tone: loadedProducts.length > 0 ? 'success' : 'error',
         text:
           loadedProducts.length > 0
-            ? `상품 ${loadedProducts.length}건을 불러왔습니다. 제외할 상품만 체크 해제하세요.`
+            ? `전체 페이지에서 상품 ${loadedProducts.length}건을 불러왔습니다. 제외할 상품만 체크 해제하세요.`
             : '불러온 상품이 없습니다. 묶음배송 검색 결과 화면을 확인해 주세요.',
       });
       return;
@@ -841,7 +841,7 @@ export function App() {
               <p className="eyebrow">예약구매 설정 작업</p>
               <h1>예약상품으로 설정</h1>
               <p className="muted">
-                현재 페이지의 묶음배송 검색 결과만 불러와 선택한 상품에 적용합니다.
+                묶음배송 검색 결과 전체 페이지를 불러와 선택한 상품에 적용합니다.
               </p>
             </div>
             <button
@@ -853,8 +853,8 @@ export function App() {
               {pendingCommand === 'collect-targets'
                 ? '불러오는 중...'
                 : products.length > 0
-                  ? '현재 페이지 다시 불러오기'
-                  : '현재 페이지 상품 불러오기'}
+                  ? '전체 페이지 다시 불러오기'
+                  : '전체 페이지 상품 불러오기'}
             </button>
           </div>
 
@@ -945,7 +945,7 @@ export function App() {
             {products.length === 0 ? (
               <EmptyState
                 title="상품을 불러오세요"
-                description="상품 조회/수정 화면에서 묶음배송 검색 후 현재 페이지 상품 불러오기를 누르세요."
+                description="상품 조회/수정 화면에서 묶음배송 검색 후 전체 페이지 상품 불러오기를 누르세요."
               />
             ) : (
               <div className="simple-table-wrap">
@@ -999,10 +999,10 @@ export function App() {
               <ol className="simple-step-list">
                 <li>작업용 브라우저에서 로그인합니다.</li>
                 <li>묶음배송 검색 결과를 엽니다.</li>
-                <li>현재 페이지 상품을 불러옵니다.</li>
+                <li>전체 페이지 상품을 불러옵니다.</li>
                 <li>제외할 상품 체크를 풉니다.</li>
                 <li>예약상품으로 설정합니다.</li>
-                <li>다음 페이지는 자동으로 확인합니다.</li>
+                <li>선택한 상품만 자동으로 처리합니다.</li>
               </ol>
             </details>
           </section>

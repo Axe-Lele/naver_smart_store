@@ -39,7 +39,9 @@ export class CollectTargetProductsUseCase {
     verificationRequired: boolean;
     note: string;
   }> {
-    const parsed = await this.parser.collectBundleDeliveryTargets();
+    const parsed = await this.parser.collectBundleDeliveryTargets({
+      pagination: "all-pages",
+    });
 
     this.logger.info("Collected target candidates", {
       count: parsed.products.length,

@@ -41,6 +41,7 @@ const BUNDLE_DELIVERY_TERMS = [
 
 const DELIVERY_FEE_TERMS = ["배송비", "배송비결제", "delivery fee", "deliveryfee"];
 const CURRENT_PAGE_FALLBACK_LIMIT = 20;
+const MAX_COLLECTION_RESULT_PAGES = 500;
 const EDIT_ACTION_READY_TIMEOUT_MS = 3_500;
 const EDIT_ACTION_POLL_MS = 80;
 
@@ -135,7 +136,9 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     };
   }
 
-  public async collectBundleDeliveryTargets(): Promise<{
+  public async collectBundleDeliveryTargets(options: {
+    pagination?: "current-page" | "all-pages";
+  } = {}): Promise<{
     products: Product[];
     verificationStatus: "verified" | "verification_required";
     note: string;
@@ -159,6 +162,39 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
       };
     }
 
+    const collection =
+      options.pagination === "all-pages"
+        ? await this.collectAllResultPages()
+        : this.collectCurrentResultPage(1);
+    const uniqueProducts = dedupeProducts(collection.products);
+    const verificationStatus =
+      collection.verificationStatus ?? filterStatus.verificationStatus;
+
+    return {
+      products: uniqueProducts,
+      verificationStatus,
+      note: [
+        filterStatus.note,
+        collection.pageCount > 1 ? `pages=${collection.pageCount}` : undefined,
+        `collected=${uniqueProducts.length}`,
+        collection.products.length > uniqueProducts.length
+          ? `deduped=${collection.products.length - uniqueProducts.length}`
+          : undefined,
+        collection.paginationNotes.length > 0
+          ? `pagination=${summarizeCollectionNotes(collection.paginationNotes)}`
+          : undefined,
+        ...collection.skippedNotes.slice(0, 5),
+      ].filter(Boolean).join(" | "),
+    };
+  }
+
+  private collectCurrentResultPage(pageIndex: number): {
+    products: Product[];
+    skippedNotes: string[];
+    paginationNotes: string[];
+    pageCount: number;
+    verificationStatus?: "verified" | "verification_required";
+  } {
     const rows = this.resolveRowCandidates();
     const products: Product[] = [];
     const skippedNotes: string[] = [];
@@ -170,23 +206,131 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
         return;
       }
 
-      skippedNotes.push(`row[${rowIndex}] skipped because product id or edit url could not be resolved`);
+      skippedNotes.push(
+        `page[${pageIndex}] row[${rowIndex}] skipped because product id or edit url could not be resolved`,
+      );
     });
 
-    const uniqueProducts = dedupeProducts(products);
+    return {
+      products,
+      skippedNotes,
+      paginationNotes: [],
+      pageCount: pageIndex,
+    };
+  }
+
+  private async collectAllResultPages(): Promise<{
+    products: Product[];
+    skippedNotes: string[];
+    paginationNotes: string[];
+    pageCount: number;
+    verificationStatus?: "verified" | "verification_required";
+  }> {
+    const products: Product[] = [];
+    const skippedNotes: string[] = [];
+    const paginationNotes: string[] = [];
+    let pageCount = 0;
+    let verificationStatus: "verified" | "verification_required" | undefined;
+    const rewind = await this.rewindToFirstCollectionPage();
+    paginationNotes.push(...rewind.notes);
+    if (!rewind.ok) {
+      verificationStatus = "verification_required";
+    }
+
+    let movedForwardCount = 0;
+
+    for (let pageIndex = 1; pageIndex <= MAX_COLLECTION_RESULT_PAGES; pageIndex += 1) {
+      const currentPage = this.collectCurrentResultPage(pageIndex);
+      pageCount = pageIndex;
+      products.push(...currentPage.products);
+      skippedNotes.push(...currentPage.skippedNotes);
+
+      if (pageIndex === MAX_COLLECTION_RESULT_PAGES) {
+        verificationStatus = "verification_required";
+        paginationNotes.push(
+          `전체 페이지 수집이 ${MAX_COLLECTION_RESULT_PAGES}페이지 안전 한도에 도달해 중단되었습니다.`,
+        );
+        break;
+      }
+
+      const moved = await this.paginationNavigator.moveToNextResultPage();
+      paginationNotes.push(moved.note);
+      if (!moved.ok) {
+        break;
+      }
+
+      if (!moved.changed) {
+        verificationStatus = "verification_required";
+        break;
+      }
+
+      movedForwardCount += 1;
+    }
+
+    const restoreStepCount = Math.max(0, movedForwardCount - rewind.movedBackwardCount);
+    const restored = await this.restoreCollectionStartPage(restoreStepCount);
+    paginationNotes.push(...restored.notes);
+    if (!restored.ok) {
+      verificationStatus = "verification_required";
+    }
 
     return {
-      products: uniqueProducts,
-      verificationStatus: filterStatus.verificationStatus,
-      note: [
-        filterStatus.note,
-        `collected=${uniqueProducts.length}`,
-        products.length > uniqueProducts.length
-          ? `deduped=${products.length - uniqueProducts.length}`
-          : undefined,
-        ...skippedNotes.slice(0, 5),
-      ].filter(Boolean).join(" | "),
+      products,
+      skippedNotes,
+      paginationNotes,
+      pageCount,
+      verificationStatus,
     };
+  }
+
+  private async rewindToFirstCollectionPage(): Promise<{
+    ok: boolean;
+    movedBackwardCount: number;
+    notes: string[];
+  }> {
+    const notes: string[] = [];
+    let movedBackwardCount = 0;
+
+    for (let index = 0; index < MAX_COLLECTION_RESULT_PAGES; index += 1) {
+      const moved = await this.paginationNavigator.moveToPreviousResultPage();
+      if (!moved.ok) {
+        return { ok: true, movedBackwardCount, notes };
+      }
+
+      notes.push(moved.note);
+      if (!moved.changed) {
+        return { ok: false, movedBackwardCount, notes };
+      }
+
+      movedBackwardCount += 1;
+    }
+
+    notes.push(
+      `첫 페이지 이동이 ${MAX_COLLECTION_RESULT_PAGES}페이지 안전 한도에 도달해 중단되었습니다.`,
+    );
+    return { ok: false, movedBackwardCount, notes };
+  }
+
+  private async restoreCollectionStartPage(movedForwardCount: number): Promise<{
+    ok: boolean;
+    notes: string[];
+  }> {
+    const notes: string[] = [];
+
+    for (let index = 0; index < movedForwardCount; index += 1) {
+      const moved = await this.paginationNavigator.moveToPreviousResultPage();
+      notes.push(moved.note);
+
+      if (!moved.ok || !moved.changed) {
+        return { ok: false, notes };
+      }
+    }
+
+    if (movedForwardCount > 0) {
+      notes.push(`상품목록 pagination을 수집 시작 페이지로 되돌렸습니다. steps=${movedForwardCount}`);
+    }
+
+    return { ok: true, notes };
   }
 
   private inspectBundleDeliveryFilter(): {
@@ -390,7 +534,11 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     return false;
   }
 
-  public async moveToNextResultPage(): Promise<{ ok: boolean; note: string }> {
+  public async moveToNextResultPage(): Promise<{
+    ok: boolean;
+    changed: boolean;
+    note: string;
+  }> {
     return this.paginationNavigator.moveToNextResultPage();
   }
 
@@ -483,6 +631,19 @@ function summarize(
   return matches.length > 0
     ? `${key} => ${matches.join(", ")}`
     : `${key} => no candidate matches`;
+}
+
+function summarizeCollectionNotes(notes: string[]): string {
+  const compactNotes = notes.filter(Boolean);
+  if (compactNotes.length <= 3) {
+    return compactNotes.join(" / ");
+  }
+
+  return [
+    ...compactNotes.slice(0, 2),
+    compactNotes.at(-1),
+    `... ${compactNotes.length - 3} more pagination steps`,
+  ].join(" / ");
 }
 
 function isElementActive(element: Element): boolean {

@@ -173,7 +173,9 @@ export interface CurrentPageTypeDetectorPort {
 
 export interface ProductSearchPageParserPort {
   inspectCurrentPage(): Promise<ProductListPageDraft>;
-  collectBundleDeliveryTargets(): Promise<{
+  collectBundleDeliveryTargets(options?: {
+    pagination?: "current-page" | "all-pages";
+  }): Promise<{
     products: Product[];
     verificationStatus: VerificationStatus;
     note: string;

@@ -655,6 +655,93 @@ describe('ProductSearchPageParser', () => {
     expect(result.note).toContain('Please apply the filter manually');
   });
 
+  it('collects bundle-delivery targets across all result pages and restores the starting page', async () => {
+    document.body.innerHTML = `
+      <input id="bundle-filter" checked value="묶음배송" />
+      <table aria-label="상품목록">
+        <thead>
+          <tr>
+            <th>상품번호</th>
+            <th>상품명</th>
+            <th>수정</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr>
+            <td>111111</td>
+            <td><span>첫 페이지 상품</span></td>
+            <td><a class="edit-link" href="/edit?originProductNo=111111">수정</a></td>
+          </tr>
+        </tbody>
+      </table>
+      <ul class="pagination _pc_pagination" data-nclicks-code="itg.page">
+        <li class="_page active" data-page="1"><a href="#" data-page-link="1">1</a></li>
+        <li class="_page" data-page="2"><a href="#" data-page-link="2">2</a></li>
+        <li class="_page ag-paging-button disabled">
+          <a ref="btPrev" aria-label="이전 페이지로 이동"><i class="seller-icon icon-left"></i></a>
+        </li>
+        <li class="_page ag-paging-button disabled">
+          <a ref="btNext" aria-label="다음 페이지로 이동"><i class="seller-icon icon-right"></i></a>
+        </li>
+      </ul>
+    `;
+
+    const rows = document.querySelector('#rows') as HTMLElement;
+    const pageOne = document.querySelector('li[data-page="1"]') as HTMLElement;
+    const pageTwo = document.querySelector('li[data-page="2"]') as HTMLElement;
+    const previousButton = document.querySelector('[ref="btPrev"]')?.closest('li') as HTMLElement;
+    const nextButton = document.querySelector('[ref="btNext"]')?.closest('li') as HTMLElement;
+
+    document.querySelector('[data-page-link="1"]')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      pageTwo.classList.remove('active');
+      pageOne.classList.add('active');
+      previousButton.classList.add('disabled');
+      nextButton.classList.remove('disabled');
+      rows.innerHTML = `
+        <tr>
+          <td>111111</td>
+          <td><span>첫 페이지 상품</span></td>
+          <td><a class="edit-link" href="/edit?originProductNo=111111">수정</a></td>
+        </tr>
+      `;
+    });
+    document.querySelector('[data-page-link="2"]')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      pageOne.classList.remove('active');
+      pageTwo.classList.add('active');
+      previousButton.classList.remove('disabled');
+      nextButton.classList.add('disabled');
+      rows.innerHTML = `
+        <tr>
+          <td>222222</td>
+          <td><span>두 번째 페이지 상품</span></td>
+          <td><a class="edit-link" href="/edit?originProductNo=222222">수정</a></td>
+        </tr>
+      `;
+    });
+
+    const parser = new ProductSearchPageParser(
+      createGateway(),
+      createRegistry(),
+      new DomExplorer(document),
+      document,
+      window,
+    );
+
+    const result = await parser.collectBundleDeliveryTargets({
+      pagination: 'all-pages',
+    });
+
+    expect(result.verificationStatus).toBe('verified');
+    expect(result.products.map((product) => product.id.toString())).toEqual([
+      '111111',
+      '222222',
+    ]);
+    expect(result.note).toContain('pages=2');
+    expect(pageOne.classList.contains('active')).toBe(true);
+  });
+
   it('returns verification_required when bundle-delivery filter is not confirmed', async () => {
     document.body.innerHTML = '<table><tbody><tr><td>row</td></tr></tbody></table>';
 
@@ -677,7 +764,7 @@ describe('ProductSearchPageParser', () => {
       <input id="bundle-filter" checked value="묶음배송" />
       <ul class="pagination _pc_pagination" data-nclicks-code="itg.page">
         <li class="_page active" data-page="0"><a href="">1</a></li>
-        <li class="_page" data-page="1"><a href="">2</a></li>
+        <li class="_page" data-page="1"><a href="" data-page-link="2">2</a></li>
         <li class="_page ag-paging-button" data-page="1">
           <a ref="btNext" aria-label="다음 페이지로 이동"><i class="seller-icon icon-right"></i></a>
         </li>
@@ -693,12 +780,14 @@ describe('ProductSearchPageParser', () => {
       </div>
     `;
 
-    document.querySelector('[ref="btNext"]')?.addEventListener('click', (event) => {
+    const moveToSecondPage = (event: Event) => {
       event.preventDefault();
       document.querySelector('li[data-page="0"]')?.classList.remove('active');
       document.querySelector('li[data-page="1"]')?.classList.add('active');
       document.querySelector('[col-id="storefarmChannelProductNo"]')!.textContent = '222222';
-    });
+    };
+    document.querySelector('[data-page-link="2"]')?.addEventListener('click', moveToSecondPage);
+    document.querySelector('[ref="btNext"]')?.addEventListener('click', moveToSecondPage);
 
     const parser = new ProductSearchPageParser(
       createGateway(),

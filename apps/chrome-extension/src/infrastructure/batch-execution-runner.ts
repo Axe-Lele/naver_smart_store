@@ -59,7 +59,9 @@ export class BatchExecutionRunner {
   ): Promise<BatchExecutionCheckpoint> {
     this.clearScheduledNavigation();
 
-    const parsed = await this.parser.collectBundleDeliveryTargets();
+    const parsed = await this.parser.collectBundleDeliveryTargets({
+      pagination: "current-page",
+    });
     if (parsed.verificationStatus !== "verified") {
       throw new Error(parsed.note);
     }
@@ -72,14 +74,11 @@ export class BatchExecutionRunner {
         ? parsed.products.filter((product) => selectedIds.has(product.id.toString()))
         : parsed.products;
 
-    if (products.length === 0 && selectedIds.size > 0) {
-      throw new Error(
-        "선택한 상품을 현재 검색 결과에서 찾지 못했습니다. 상품을 다시 불러온 뒤 선택해 주세요.",
-      );
-    }
-
     const previous = await this.batchStore.load();
-    const selectedProductIdValues = new Set(products.map((product) => product.id.toString()));
+    const selectedProductIdValues =
+      selectedIds.size > 0
+        ? selectedIds
+        : new Set(products.map((product) => product.id.toString()));
     const previousSuccessfulResults = policy.resumeFromCheckpoint
       ? (previous?.results ?? []).filter(
           (result) =>
@@ -118,6 +117,7 @@ export class BatchExecutionRunner {
       consecutiveFailureCount: 0,
       stopOnConsecutiveFailures: policy.stopOnConsecutiveFailures,
       requiredOptions,
+      selectedProductIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
       targets,
       results,
     };
@@ -350,7 +350,9 @@ export class BatchExecutionRunner {
       }
 
       await this.waitStrategy.waitForDocumentReady(8_000);
-      const parsed = await this.parser.collectBundleDeliveryTargets();
+      const parsed = await this.parser.collectBundleDeliveryTargets({
+        pagination: "current-page",
+      });
       if (parsed.verificationStatus !== "verified") {
         return this.stopAtPaginationFailure(
           checkpoint,
@@ -358,7 +360,10 @@ export class BatchExecutionRunner {
         );
       }
 
-      const nextTargets = filterNewProducts(parsed.products, knownProductIds);
+      const nextTargets = filterSelectedProducts(
+        filterNewProducts(parsed.products, knownProductIds),
+        checkpoint.selectedProductIds,
+      );
 
       if (nextTargets.length === 0) {
         await this.progressStore.save(
@@ -646,6 +651,18 @@ function mergeResults(
   }
 
   return [...map.values()];
+}
+
+function filterSelectedProducts(
+  products: Product[],
+  selectedProductIds: readonly string[] | undefined,
+): Product[] {
+  if (!selectedProductIds || selectedProductIds.length === 0) {
+    return products;
+  }
+
+  const selected = new Set(selectedProductIds.map((productId) => productId.trim()));
+  return products.filter((product) => selected.has(product.id.toString()));
 }
 
 function toProgressSnapshot(

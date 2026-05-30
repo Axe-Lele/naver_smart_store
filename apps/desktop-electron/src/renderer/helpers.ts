@@ -211,7 +211,7 @@ export function getRecommendedNextStep(input: {
   }
 
   if (input.productCount === 0) {
-    return '현재 페이지 상품을 불러오세요.';
+    return '전체 페이지 상품을 불러오세요.';
   }
 
   if (input.selectedCount === 0) {
