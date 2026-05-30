@@ -201,6 +201,100 @@ describe('ProductSearchPageParser', () => {
     expect(result.note).toContain('Please apply the filter manually');
   });
 
+  it('prepares the all-period bundle-delivery search before collecting all pages', async () => {
+    document.body.innerHTML = `
+      <div class="form-group" ng-if="vm.dateRangeUsable">
+        <div class="btn-toolbar">
+          <div class="btn-group" data-nclicks-code="spd.quick">
+            <button type="button" class="btn btn-primary2 active">1년</button>
+            <button type="button" class="btn btn-primary2">전체</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-default btn-right active" data-nclicks-code="sss.open">
+        상세검색 <i class="fn fn-down2" aria-hidden="true"></i>
+      </button>
+      <div class="form-group">
+        <div class="selectize-control single">
+          <div class="selectize-input items full has-options has-items">
+            <div data-value="" class="item">묶음배송</div>
+            <input type="text" autocomplete="off" tabindex="0" readonly="" />
+          </div>
+          <div class="selectize-dropdown single" style="display: none;">
+            <div class="selectize-dropdown-content">
+              <div data-value="" data-selectable="" class="option selected">묶음배송</div>
+              <div data-value="BUNDLEGROUP_POSSIBLE" data-selectable="" class="option">가능</div>
+              <div data-value="BUNDLEGROUP_IMPOSSIBLE" data-selectable="" class="option">불가</div>
+            </div>
+          </div>
+        </div>
+        <select selectize="" class="selectized" tabindex="-1">
+          <option value="" selected="selected">묶음배송</option>
+          <option value="BUNDLEGROUP_POSSIBLE">가능</option>
+          <option value="BUNDLEGROUP_IMPOSSIBLE">불가</option>
+        </select>
+      </div>
+      <button type="button" class="btn btn-primary search-button">검색</button>
+      <table>
+        <tbody>
+          <tr>
+            <td><a class="edit-link" href="/edit?originProductNo=1183456">수정</a></td>
+            <td><span>자동 조건 상품</span></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    const periodButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-nclicks-code="spd.quick"] button'));
+    const detailButton = document.querySelector<HTMLButtonElement>('[data-nclicks-code="sss.open"]')!;
+    const currentItem = document.querySelector<HTMLElement>('.selectize-input .item')!;
+    const possibleOption = document.querySelector<HTMLElement>('[data-value="BUNDLEGROUP_POSSIBLE"].option')!;
+    const select = document.querySelector<HTMLSelectElement>('select.selectized')!;
+    const searchButton = document.querySelector<HTMLButtonElement>('.search-button')!;
+    const searchClickHandler = vi.fn();
+
+    periodButtons.at(-1)?.addEventListener('click', () => {
+      periodButtons.forEach((button) => button.classList.remove('active'));
+      periodButtons.at(-1)?.classList.add('active');
+    });
+    detailButton.addEventListener('click', () => {
+      detailButton.classList.remove('active');
+      detailButton.querySelector('i')?.classList.remove('fn-down2');
+      detailButton.querySelector('i')?.classList.add('fn-up2');
+    });
+    possibleOption.addEventListener('click', () => {
+      currentItem.dataset.value = 'BUNDLEGROUP_POSSIBLE';
+      currentItem.textContent = '가능';
+      select.value = 'BUNDLEGROUP_POSSIBLE';
+      Array.from(select.options).forEach((option) => {
+        option.selected = option.value === 'BUNDLEGROUP_POSSIBLE';
+      });
+      document.querySelector('[data-value=""].option')?.classList.remove('selected');
+      possibleOption.classList.add('selected');
+    });
+    searchButton.addEventListener('click', searchClickHandler);
+
+    const parser = new ProductSearchPageParser(
+      createGateway(),
+      createRegistry(),
+      new DomExplorer(document),
+      document,
+      window,
+    );
+
+    const result = await parser.collectBundleDeliveryTargets({
+      pagination: 'all-pages',
+    });
+
+    expect(periodButtons.at(-1)?.classList.contains('active')).toBe(true);
+    expect(detailButton.classList.contains('active')).toBe(false);
+    expect(currentItem.dataset.value).toBe('BUNDLEGROUP_POSSIBLE');
+    expect(searchClickHandler).toHaveBeenCalledTimes(1);
+    expect(result.verificationStatus).toBe('verified');
+    expect(result.products.map((product) => product.id.toString())).toEqual(['1183456']);
+    expect(result.note).toContain('자동 검색 조건 설정');
+  });
+
   it('does not use edit action text as the product name', async () => {
     document.body.innerHTML = `
       <input id="bundle-filter" checked value="묶음배송" />

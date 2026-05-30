@@ -79,6 +79,7 @@ export function App() {
   const pendingCommandTimeoutIdRef = useRef<number | null>(null);
   const ignoredCommandIdsRef = useRef<Set<string>>(new Set());
   const cancelPendingTypeRef = useRef<HybridCommandType | null>(null);
+  const autoCollectKeyRef = useRef<string | null>(null);
 
   const activeProgress = useMemo(
     () => getHybridProgress(hybridState?.activeClient?.progress),
@@ -258,6 +259,42 @@ export function App() {
       setEventHistory((current) => [event, ...current].slice(0, 300));
     });
   }, []);
+
+  useEffect(() => {
+    if (
+      booting ||
+      pendingCommand ||
+      products.length > 0 ||
+      activeProgress?.phase === 'executing' ||
+      activeProgress?.phase === 'stopped' ||
+      !isProductListBridgeState(hybridState)
+    ) {
+      return;
+    }
+
+    const activeClient = hybridState?.activeClient;
+    if (!activeClient) {
+      return;
+    }
+
+    const autoCollectKey = `${activeClient.clientId}:${activeClient.pageUrl}`;
+    if (autoCollectKeyRef.current === autoCollectKey) {
+      return;
+    }
+
+    autoCollectKeyRef.current = autoCollectKey;
+    setNotice({
+      tone: 'info',
+      text: '상품 조회/수정 화면을 감지했습니다. 전체 기간과 묶음배송 가능 조건을 자동 설정한 뒤 상품을 불러옵니다.',
+    });
+    void sendHybridCommand('collect-targets');
+  }, [
+    activeProgress?.phase,
+    booting,
+    hybridState,
+    pendingCommand,
+    products.length,
+  ]);
 
   useEffect(() => {
     try {

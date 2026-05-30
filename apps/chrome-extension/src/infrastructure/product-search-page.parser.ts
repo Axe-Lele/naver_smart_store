@@ -45,6 +45,7 @@ const CURRENT_PAGE_FALLBACK_LIMIT = 20;
 const MAX_COLLECTION_RESULT_PAGES = 500;
 const MAX_AG_GRID_SCROLL_STEPS = 120;
 const AG_GRID_SCROLL_SETTLE_MS = 120;
+const SEARCH_FILTER_SETTLE_MS = 250;
 const EDIT_ACTION_READY_TIMEOUT_MS = 3_500;
 const EDIT_ACTION_POLL_MS = 80;
 
@@ -164,12 +165,16 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
 
     await this.waitStrategy.waitForReady({ timeoutMs: 10_000, retries: 1 });
 
+    const preparedSearch =
+      options.pagination === "all-pages"
+        ? await this.prepareBundleDeliverySearchFilters()
+        : undefined;
     const filterStatus = this.inspectBundleDeliveryFilter();
     if (!filterStatus.applied) {
       return {
         products: [],
         verificationStatus: "verification_required",
-        note: filterStatus.note,
+        note: [preparedSearch?.note, filterStatus.note].filter(Boolean).join(" | "),
       };
     }
 
@@ -185,6 +190,7 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
       products: uniqueProducts,
       verificationStatus,
       note: [
+        preparedSearch?.note,
         filterStatus.note,
         collection.pageCount > 1 ? `pages=${collection.pageCount}` : undefined,
         `collected=${uniqueProducts.length}`,
@@ -196,6 +202,54 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
           : undefined,
         ...collection.skippedNotes.slice(0, 5),
       ].filter(Boolean).join(" | "),
+    };
+  }
+
+  public async prepareBundleDeliverySearchFilters(): Promise<{
+    changed: boolean;
+    note: string;
+  }> {
+    const notes: string[] = [];
+    let changed = false;
+
+    const clickedAllPeriod = clickAllDateRangeButton(this.documentRef);
+    if (clickedAllPeriod) {
+      changed = true;
+      notes.push("기간=전체");
+      await delay(this.windowRef, SEARCH_FILTER_SETTLE_MS);
+    }
+
+    const openedDetailSearch = clickDetailSearchToggleIfClosed(this.documentRef);
+    if (openedDetailSearch) {
+      changed = true;
+      notes.push("상세검색 열림");
+      await delay(this.windowRef, SEARCH_FILTER_SETTLE_MS);
+    }
+
+    const bundleDelivery = selectBundleDeliveryPossible(this.documentRef);
+    if (bundleDelivery.changed) {
+      changed = true;
+      notes.push(bundleDelivery.note);
+      await delay(this.windowRef, SEARCH_FILTER_SETTLE_MS);
+    } else if (bundleDelivery.note) {
+      notes.push(bundleDelivery.note);
+    }
+
+    if (changed) {
+      const clickedSearch = clickProductSearchButton(this.documentRef);
+      if (clickedSearch) {
+        notes.push("검색 실행");
+      }
+
+      await this.waitStrategy.waitForReady({ timeoutMs: 10_000, retries: 0 });
+    }
+
+    return {
+      changed,
+      note:
+        notes.length > 0
+          ? `자동 검색 조건 설정: ${notes.join(", ")}`
+          : "자동 검색 조건 설정: 변경할 조건이 없습니다.",
     };
   }
 
@@ -766,6 +820,217 @@ function summarizeCollectionNotes(notes: string[]): string {
     compactNotes.at(-1),
     `... ${compactNotes.length - 3} more pagination steps`,
   ].join(" / ");
+}
+
+function clickAllDateRangeButton(documentRef: Document): boolean {
+  const buttons = safeQuerySelectorAll(
+    documentRef,
+    "[data-nclicks-code='spd.quick'] button, button",
+  );
+  const target = buttons.find((button) => {
+    return (
+      button instanceof HTMLButtonElement &&
+      normalizeWhitespace(button.textContent) === "전체" &&
+      !button.disabled &&
+      isVisibleElement(button)
+    );
+  });
+
+  if (!target) {
+    return false;
+  }
+
+  if (target.classList.contains("active")) {
+    return false;
+  }
+
+  triggerClick(target);
+  return true;
+}
+
+function clickDetailSearchToggleIfClosed(documentRef: Document): boolean {
+  const button = safeQuerySelectorAll(documentRef, "button").find((candidate) => {
+    return normalizeWhitespace(candidate.textContent).includes("상세검색") &&
+      isVisibleElement(candidate);
+  });
+
+  if (!(button instanceof HTMLButtonElement) || button.disabled) {
+    return false;
+  }
+
+  const descriptor = normalizeWhitespace(
+    [
+      button.getAttribute("class"),
+      button.getAttribute("aria-expanded"),
+      button.querySelector("i")?.getAttribute("class"),
+    ].join(" "),
+  ).toLowerCase();
+  const looksClosed =
+    descriptor.includes("active") ||
+    descriptor.includes("false") ||
+    descriptor.includes("fn-down");
+
+  if (!looksClosed) {
+    return false;
+  }
+
+  triggerClick(button);
+  return true;
+}
+
+function selectBundleDeliveryPossible(documentRef: Document): {
+  changed: boolean;
+  note: string;
+} {
+  if (findSelectedBundleGroupPossibleElement(documentRef)) {
+    return { changed: false, note: "묶음배송=가능 확인" };
+  }
+
+  const roots = findBundleDeliverySelectizeRoots(documentRef);
+  for (const root of roots) {
+    const clicked = clickBundleDeliveryPossibleOption(root);
+    const synced = syncBundleDeliveryNativeSelect(root);
+    if (clicked || synced) {
+      return { changed: true, note: "묶음배송=가능" };
+    }
+  }
+
+  return { changed: false, note: "묶음배송 선택기를 찾지 못했습니다" };
+}
+
+function findSelectedBundleGroupPossibleElement(documentRef: Document): Element | null {
+  return safeQuerySelectorAll(
+    documentRef,
+    [
+      "select",
+      "option",
+      "[data-value='BUNDLEGROUP_POSSIBLE']",
+      "[aria-selected='true']",
+      "[data-selected='true']",
+      "[data-active='true']",
+    ].join(","),
+  ).find(isSelectedBundleGroupPossibleControl) ?? null;
+}
+
+function findBundleDeliverySelectizeRoots(documentRef: Document): Element[] {
+  const roots = uniqueElements(
+    safeQuerySelectorAll(
+      documentRef,
+      ".form-group, .selectize-control, select.selectized",
+    ).flatMap((element) => {
+      const root = element.closest(".form-group") ?? element.closest(".selectize-control") ?? element;
+      return root ? [root] : [];
+    }),
+  );
+
+  return roots.filter((root) => {
+    const descriptor = readControlDescriptor(root);
+    const hasBundleLabel = containsBundleDeliveryTerm(descriptor);
+    const hasPossibleOption = Boolean(
+      root.querySelector(
+        "[data-value='BUNDLEGROUP_POSSIBLE'], option[value='BUNDLEGROUP_POSSIBLE']",
+      ),
+    );
+
+    return hasBundleLabel && hasPossibleOption;
+  });
+}
+
+function clickBundleDeliveryPossibleOption(root: Element): boolean {
+  const control = root.querySelector(".selectize-input, .selectize-control");
+  if (control) {
+    triggerClick(control);
+  }
+
+  const option = Array.from(
+    root.querySelectorAll("[data-value='BUNDLEGROUP_POSSIBLE']"),
+  ).find((candidate) => {
+    const className = normalizeWhitespace(candidate.getAttribute("class")).toLowerCase();
+    return className.includes("option") || candidate.getAttribute("data-selectable") !== null;
+  });
+
+  if (!option) {
+    return false;
+  }
+
+  triggerClick(option);
+  return true;
+}
+
+function syncBundleDeliveryNativeSelect(root: Element): boolean {
+  const select = root.querySelector<HTMLSelectElement>(
+    "select option[value='BUNDLEGROUP_POSSIBLE']",
+  )?.closest("select");
+  if (!select) {
+    return false;
+  }
+
+  const selectWithPlugin = select as HTMLSelectElement & {
+    selectize?: {
+      setValue?: (value: string, silent?: boolean) => void;
+    };
+  };
+
+  if (typeof selectWithPlugin.selectize?.setValue === "function") {
+    selectWithPlugin.selectize.setValue("BUNDLEGROUP_POSSIBLE", false);
+    return true;
+  }
+
+  select.value = "BUNDLEGROUP_POSSIBLE";
+  for (const option of Array.from(select.options)) {
+    option.selected = option.value === "BUNDLEGROUP_POSSIBLE";
+  }
+  dispatchInputAndChange(select);
+  return true;
+}
+
+function clickProductSearchButton(documentRef: Document): boolean {
+  const target = safeQuerySelectorAll(documentRef, "button, input[type='button'], input[type='submit']")
+    .find((candidate) => {
+      const text = normalizeWhitespace(
+        candidate instanceof HTMLInputElement
+          ? candidate.value
+          : candidate.textContent,
+      );
+      return (
+        (text === "검색" || text === "조회") &&
+        !normalizeWhitespace(candidate.textContent).includes("상세검색") &&
+        isVisibleElement(candidate) &&
+        !isDisabledControl(candidate)
+      );
+    });
+
+  if (!target) {
+    return false;
+  }
+
+  triggerClick(target);
+  return true;
+}
+
+function isDisabledControl(element: Element): boolean {
+  if (
+    element instanceof HTMLButtonElement ||
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement
+  ) {
+    return element.disabled;
+  }
+
+  const descriptor = normalizeWhitespace(
+    [
+      element.getAttribute("disabled"),
+      element.getAttribute("aria-disabled"),
+      element.getAttribute("class"),
+    ].join(" "),
+  ).toLowerCase();
+
+  return descriptor.includes("true") || descriptor.includes("disabled");
+}
+
+function dispatchInputAndChange(element: Element): void {
+  element.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
 }
 
 function isElementActive(element: Element): boolean {
