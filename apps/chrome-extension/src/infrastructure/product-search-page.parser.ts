@@ -43,8 +43,18 @@ const DELIVERY_FEE_TERMS = ["배송비", "배송비결제", "delivery fee", "del
 const BUNDLE_GROUP_POSSIBLE_VALUES = ["BUNDLEGROUP_POSSIBLE"];
 const CURRENT_PAGE_FALLBACK_LIMIT = 20;
 const MAX_COLLECTION_RESULT_PAGES = 500;
+const MAX_AG_GRID_SCROLL_STEPS = 120;
+const AG_GRID_SCROLL_SETTLE_MS = 120;
 const EDIT_ACTION_READY_TIMEOUT_MS = 3_500;
 const EDIT_ACTION_POLL_MS = 80;
+
+type PageCollectionResult = {
+  products: Product[];
+  skippedNotes: string[];
+  paginationNotes: string[];
+  pageCount: number;
+  verificationStatus?: "verified" | "verification_required";
+};
 
 const APPLIED_FILTER_SELECTORS = [
   "[class*='chip']",
@@ -166,7 +176,7 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     const collection =
       options.pagination === "all-pages"
         ? await this.collectAllResultPages()
-        : this.collectCurrentResultPage(1);
+        : await this.collectCurrentResultPage(1);
     const uniqueProducts = dedupeProducts(collection.products);
     const verificationStatus =
       collection.verificationStatus ?? filterStatus.verificationStatus;
@@ -189,13 +199,12 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     };
   }
 
-  private collectCurrentResultPage(pageIndex: number): {
-    products: Product[];
-    skippedNotes: string[];
-    paginationNotes: string[];
-    pageCount: number;
-    verificationStatus?: "verified" | "verification_required";
-  } {
+  private async collectCurrentResultPage(pageIndex: number): Promise<PageCollectionResult> {
+    const agGridCollection = await this.collectAgGridResultPage(pageIndex);
+    if (agGridCollection) {
+      return agGridCollection;
+    }
+
     const rows = this.resolveRowCandidates();
     const products: Product[] = [];
     const skippedNotes: string[] = [];
@@ -220,13 +229,76 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     };
   }
 
-  private async collectAllResultPages(): Promise<{
-    products: Product[];
-    skippedNotes: string[];
-    paginationNotes: string[];
-    pageCount: number;
-    verificationStatus?: "verified" | "verification_required";
-  }> {
+  private async collectAgGridResultPage(
+    pageIndex: number,
+  ): Promise<PageCollectionResult | null> {
+    const context = findAgGridCollectionContext(this.documentRef);
+    if (!context) {
+      return null;
+    }
+
+    const productsById = new Map<string, Product>();
+    const skippedNotes: string[] = [];
+    const paginationNotes: string[] = [];
+    const expectedRowCount = readAgGridCurrentPageRowCount(this.documentRef);
+    const originalScrollTop = context.viewport.scrollTop;
+    const scrollPositions = buildAgGridScrollPositions(
+      this.documentRef,
+      context,
+      expectedRowCount,
+    );
+    let verificationStatus: "verified" | "verification_required" | undefined;
+
+    try {
+      for (const scrollTop of scrollPositions) {
+        await this.scrollAgGridViewport(context.viewport, scrollTop);
+        const rows = findAgGridProductRows(this.documentRef);
+
+        rows.forEach((row, rowIndex) => {
+          const parsed = this.parseRow(row);
+          if (parsed) {
+            productsById.set(parsed.id.toString(), parsed);
+            return;
+          }
+
+          skippedNotes.push(
+            `page[${pageIndex}] ag-grid row[${rowIndex}] skipped because product id or edit url could not be resolved`,
+          );
+        });
+
+        if (expectedRowCount !== undefined && productsById.size >= expectedRowCount) {
+          break;
+        }
+      }
+    } finally {
+      await this.scrollAgGridViewport(context.viewport, originalScrollTop);
+    }
+
+    if (expectedRowCount !== undefined && productsById.size < expectedRowCount) {
+      verificationStatus = "verification_required";
+      paginationNotes.push(
+        `page[${pageIndex}] ag-grid expectedRows=${expectedRowCount} collectedRows=${productsById.size}`,
+      );
+    } else {
+      paginationNotes.push(
+        [
+          `page[${pageIndex}] ag-grid collectedRows=${productsById.size}`,
+          expectedRowCount !== undefined ? `expectedRows=${expectedRowCount}` : undefined,
+          `scrollSteps=${scrollPositions.length}`,
+        ].filter(Boolean).join(" "),
+      );
+    }
+
+    return {
+      products: [...productsById.values()],
+      skippedNotes,
+      paginationNotes,
+      pageCount: pageIndex,
+      verificationStatus,
+    };
+  }
+
+  private async collectAllResultPages(): Promise<PageCollectionResult> {
     const products: Product[] = [];
     const skippedNotes: string[] = [];
     const paginationNotes: string[] = [];
@@ -241,7 +313,7 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     let movedForwardCount = 0;
 
     for (let pageIndex = 1; pageIndex <= MAX_COLLECTION_RESULT_PAGES; pageIndex += 1) {
-      const currentPage = this.collectCurrentResultPage(pageIndex);
+      const currentPage = await this.collectCurrentResultPage(pageIndex);
       pageCount = pageIndex;
       products.push(...currentPage.products);
       skippedNotes.push(...currentPage.skippedNotes);
@@ -529,6 +601,10 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
       return true;
     }
 
+    if (await this.clickEditForProductAcrossAgGrid(productId)) {
+      return true;
+    }
+
     const startedAt = Date.now();
     while (Date.now() - startedAt < EDIT_ACTION_READY_TIMEOUT_MS) {
       await delay(this.windowRef, EDIT_ACTION_POLL_MS);
@@ -538,6 +614,46 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     }
 
     return false;
+  }
+
+  private async clickEditForProductAcrossAgGrid(productId: string): Promise<boolean> {
+    const context = findAgGridCollectionContext(this.documentRef);
+    if (!context) {
+      return false;
+    }
+
+    const originalScrollTop = context.viewport.scrollTop;
+    const scrollPositions = buildAgGridScrollPositions(
+      this.documentRef,
+      context,
+      readAgGridCurrentPageRowCount(this.documentRef),
+    );
+    let clicked = false;
+
+    try {
+      for (const scrollTop of scrollPositions) {
+        await this.scrollAgGridViewport(context.viewport, scrollTop);
+        if (this.clickEditForProduct(productId)) {
+          clicked = true;
+          return true;
+        }
+      }
+    } finally {
+      if (!clicked) {
+        await this.scrollAgGridViewport(context.viewport, originalScrollTop);
+      }
+    }
+
+    return false;
+  }
+
+  private async scrollAgGridViewport(
+    viewport: HTMLElement,
+    scrollTop: number,
+  ): Promise<void> {
+    viewport.scrollTop = Math.max(0, scrollTop);
+    viewport.dispatchEvent(new Event("scroll", { bubbles: true, cancelable: true }));
+    await delay(this.windowRef, AG_GRID_SCROLL_SETTLE_MS);
   }
 
   public async moveToNextResultPage(): Promise<{
@@ -941,6 +1057,140 @@ function findAgGridProductRows(documentRef: Document): Element[] {
   return rows.filter(isAgGridProductRow);
 }
 
+function findAgGridCollectionContext(documentRef: Document): {
+  viewport: HTMLElement;
+} | null {
+  const rows = findAgGridProductRows(documentRef);
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const viewport = safeQuerySelectorAll(
+    documentRef,
+    [
+      ".seller-grid-area .ag-body-viewport[ref='eBodyViewport']",
+      ".seller-grid-area .ag-body-viewport",
+      ".ag-root .ag-body-viewport[ref='eBodyViewport']",
+      ".ag-root .ag-body-viewport",
+      ".ag-body-viewport",
+    ].join(","),
+  ).find((element): element is HTMLElement => {
+    return element instanceof HTMLElement && Boolean(element.querySelector("[role='row']"));
+  });
+
+  return viewport ? { viewport } : null;
+}
+
+function buildAgGridScrollPositions(
+  documentRef: Document,
+  context: { viewport: HTMLElement },
+  expectedRowCount: number | undefined,
+): number[] {
+  const rowHeight = readAgGridRowHeight(documentRef);
+  const visibleRowCount = Math.max(1, findAgGridProductRows(documentRef).length);
+  const viewportHeight =
+    context.viewport.clientHeight ||
+    readStylePixelValue(context.viewport, "height") ||
+    rowHeight * visibleRowCount;
+  const virtualHeight =
+    context.viewport.scrollHeight ||
+    readAgGridVirtualHeight(documentRef) ||
+    (expectedRowCount !== undefined ? expectedRowCount * rowHeight : undefined);
+  const maxScrollTop =
+    virtualHeight !== undefined
+      ? Math.max(0, virtualHeight - viewportHeight)
+      : 0;
+  const step = Math.max(
+    rowHeight,
+    Math.min(
+      viewportHeight || rowHeight * visibleRowCount,
+      rowHeight * Math.max(1, visibleRowCount - 2),
+    ),
+  );
+  const positions = [0];
+
+  if (maxScrollTop <= 0) {
+    return positions;
+  }
+
+  let next = step;
+  while (next < maxScrollTop && positions.length < MAX_AG_GRID_SCROLL_STEPS - 1) {
+    positions.push(Math.round(next));
+    next += step;
+  }
+
+  const finalPosition = Math.round(maxScrollTop);
+  if (positions.at(-1) !== finalPosition && positions.length < MAX_AG_GRID_SCROLL_STEPS) {
+    positions.push(finalPosition);
+  }
+
+  return positions;
+}
+
+function readAgGridCurrentPageRowCount(documentRef: Document): number | undefined {
+  const firstRow = readIntegerText(
+    documentRef.querySelector(".ag-paging-row-summary-panel ._sell_firstRowOnPage"),
+  );
+  const lastRow = readIntegerText(
+    documentRef.querySelector(".ag-paging-row-summary-panel ._sell_lastRowOnPage"),
+  );
+
+  if (
+    firstRow !== undefined &&
+    lastRow !== undefined &&
+    lastRow >= firstRow
+  ) {
+    return lastRow - firstRow + 1;
+  }
+
+  const ariaRowCount = readIntegerText(
+    documentRef.querySelector(".ag-root[role='grid']")?.getAttribute("aria-rowcount"),
+  );
+  if (ariaRowCount !== undefined && ariaRowCount > 2) {
+    return ariaRowCount - 2;
+  }
+
+  return undefined;
+}
+
+function readAgGridRowHeight(documentRef: Document): number {
+  const row = findAgGridProductRows(documentRef)[0];
+  if (!row) {
+    return 40;
+  }
+
+  const rectHeight = row.getBoundingClientRect?.().height;
+  if (rectHeight && rectHeight > 0) {
+    return rectHeight;
+  }
+
+  return readStylePixelValue(row, "height") ?? 40;
+}
+
+function readAgGridVirtualHeight(documentRef: Document): number | undefined {
+  const candidates = safeQuerySelectorAll(
+    documentRef,
+    [
+      ".ag-pinned-left-cols-container",
+      ".ag-center-cols-container",
+      ".ag-pinned-right-cols-container",
+      "[ref='eLeftContainer']",
+      "[ref='eCenterContainer']",
+    ].join(","),
+  );
+
+  for (const candidate of candidates) {
+    const scrollHeight = candidate instanceof HTMLElement ? candidate.scrollHeight : 0;
+    const styleHeight = readStylePixelValue(candidate, "height");
+    const height = Math.max(scrollHeight, styleHeight ?? 0);
+    if (height > 0) {
+      return height;
+    }
+  }
+
+  return undefined;
+}
+
 function isAgGridProductRow(row: Element): boolean {
   return Boolean(findAgGridEditButton(row) && extractAgGridProductId(row));
 }
@@ -1118,6 +1368,42 @@ function readDisplayedProductTotal(documentRef: Document): number | undefined {
 
   const value = Number(match[1].replace(/,/g, ""));
   return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function readIntegerText(value: Element | string | null | undefined): number | undefined {
+  const text =
+    typeof value === "string"
+      ? value
+      : value instanceof Element
+        ? value.textContent
+        : undefined;
+  const match = normalizeWhitespace(text).match(/[\d,]+/);
+  if (!match?.[0]) {
+    return undefined;
+  }
+
+  const parsed = Number(match[0].replace(/,/g, ""));
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function readStylePixelValue(element: Element, propertyName: string): number | undefined {
+  const inlineStyle = element.getAttribute("style") ?? "";
+  const match = inlineStyle.match(
+    new RegExp(`${escapeRegExp(propertyName)}\\s*:\\s*([\\d.]+)px`, "i"),
+  );
+  if (match?.[1]) {
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  const htmlElement = element as HTMLElement;
+  const computedValue = window.getComputedStyle?.(htmlElement).getPropertyValue(propertyName);
+  const parsed = Number.parseFloat(computedValue ?? "");
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function safeQuerySelectorAll(root: ParentNode, selector: string): Element[] {

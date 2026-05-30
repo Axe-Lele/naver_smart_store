@@ -602,6 +602,125 @@ describe('ProductSearchPageParser', () => {
     expect(clickedProductIds).toEqual(['13527656761']);
   });
 
+  it('scrolls the virtualized ag-grid page to collect all visible-page rows', async () => {
+    document.body.innerHTML = `
+      <input id="bundle-filter" checked value="묶음배송" />
+      <div class="ag-root" role="grid" aria-rowcount="7">
+        <div class="ag-body-viewport ag-layout-normal" ref="eBodyViewport" style="height: 80px;">
+          <div class="ag-pinned-left-cols-container" ref="eLeftContainer" style="height: 200px;"></div>
+        </div>
+      </div>
+      <nav class="seller-pagination">
+        <span class="ag-paging-row-summary-panel _sell_pageRowSummaryPanel" style="display:none;">
+          <span ref="lbFirstRowOnPage" class="_sell_firstRowOnPage">1</span>
+          <span ref="lbLastRowOnPage" class="_sell_lastRowOnPage">5</span>
+          <span ref="lbRecordCount" class="_sell_recordCount">5</span>
+        </span>
+      </nav>
+    `;
+
+    const viewport = document.querySelector('.ag-body-viewport') as HTMLElement;
+    const rowsContainer = document.querySelector('.ag-pinned-left-cols-container') as HTMLElement;
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 80 });
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 200 });
+
+    const products = ['100001', '100002', '100003', '100004', '100005'];
+    const renderRows = (startIndex: number) => {
+      rowsContainer.innerHTML = products
+        .slice(startIndex, startIndex + 2)
+        .map((productId, offset) =>
+          renderAgGridProductRow({
+            rowIndex: startIndex + offset,
+            productId,
+            name: `가상 스크롤 상품 ${productId}`,
+          }),
+        )
+        .join('');
+    };
+
+    viewport.addEventListener('scroll', () => {
+      renderRows(Math.min(products.length - 2, Math.floor(viewport.scrollTop / 40)));
+    });
+    renderRows(0);
+
+    const parser = new ProductSearchPageParser(
+      createGateway(),
+      createRegistry(),
+      new DomExplorer(document),
+      document,
+      window,
+    );
+
+    const result = await parser.collectBundleDeliveryTargets();
+
+    expect(result.verificationStatus).toBe('verified');
+    expect(result.products.map((product) => product.id.toString())).toEqual(products);
+    expect(result.note).toContain('expectedRows=5');
+    expect(viewport.scrollTop).toBe(0);
+  });
+
+  it('scrolls the virtualized ag-grid page to open an off-screen edit button', async () => {
+    document.body.innerHTML = `
+      <input id="bundle-filter" checked value="묶음배송" />
+      <div class="ag-root" role="grid" aria-rowcount="7">
+        <div class="ag-body-viewport ag-layout-normal" ref="eBodyViewport" style="height: 80px;">
+          <div class="ag-pinned-left-cols-container" ref="eLeftContainer" style="height: 200px;"></div>
+        </div>
+      </div>
+      <nav class="seller-pagination">
+        <span class="ag-paging-row-summary-panel _sell_pageRowSummaryPanel" style="display:none;">
+          <span ref="lbFirstRowOnPage" class="_sell_firstRowOnPage">1</span>
+          <span ref="lbLastRowOnPage" class="_sell_lastRowOnPage">5</span>
+          <span ref="lbRecordCount" class="_sell_recordCount">5</span>
+        </span>
+      </nav>
+    `;
+
+    const viewport = document.querySelector('.ag-body-viewport') as HTMLElement;
+    const rowsContainer = document.querySelector('.ag-pinned-left-cols-container') as HTMLElement;
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 80 });
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 200 });
+
+    const products = ['100001', '100002', '100003', '100004', '100005'];
+    const clickedProductIds: string[] = [];
+    const renderRows = (startIndex: number) => {
+      rowsContainer.innerHTML = products
+        .slice(startIndex, startIndex + 2)
+        .map((productId, offset) =>
+          renderAgGridProductRow({
+            rowIndex: startIndex + offset,
+            productId,
+            name: `가상 스크롤 상품 ${productId}`,
+          }),
+        )
+        .join('');
+    };
+
+    viewport.addEventListener('scroll', () => {
+      renderRows(Math.min(products.length - 2, Math.floor(viewport.scrollTop / 40)));
+    });
+    rowsContainer.addEventListener('click', (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>(
+        'button[data-product-id]',
+      );
+      if (button) {
+        clickedProductIds.push(button.dataset.productId ?? '');
+      }
+    });
+    renderRows(0);
+
+    const parser = new ProductSearchPageParser(
+      createGateway(),
+      createRegistry(),
+      new DomExplorer(document),
+      document,
+      window,
+    );
+
+    await expect(parser.openEditForProduct('100005')).resolves.toBe(true);
+    expect(clickedProductIds).toEqual(['100005']);
+  });
+
   it('falls back to the visible current-page list when the seller-center hides the bundle value', async () => {
     document.body.innerHTML = `
       <section class="detail-search">
@@ -941,6 +1060,24 @@ function createRegistryWithoutEditAction(): SelectorRegistryPort {
       return [];
     },
   };
+}
+
+function renderAgGridProductRow(input: {
+  rowIndex: number;
+  productId: string;
+  name: string;
+}): string {
+  return `
+    <div role="row" row-index="${input.rowIndex}" row-id="${input.rowIndex}" class="ag-row ag-row-position-absolute" style="height: 40px; transform: translateY(${input.rowIndex * 40}px);">
+      <div role="gridcell" col-id="edit">
+        <button class="btn btn-primary btn-xs" data-nclicks-code="itg.edit" data-product-id="${input.productId}">수정</button>
+      </div>
+      <div role="gridcell" col-id="storefarmChannelProductNo">
+        <a href="https://smartstore.naver.com/wishfigure_ss/products/${input.productId}" data-nclicks-code="itg.numbersf">${input.productId}</a>
+      </div>
+      <div role="gridcell" col-id="productName">${input.name}</div>
+    </div>
+  `;
 }
 
 function cssCandidate(key: string, value: string) {
