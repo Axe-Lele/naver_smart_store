@@ -112,6 +112,95 @@ describe('ProductSearchPageParser', () => {
     expect(result.note).toContain('appears selected');
   });
 
+  it('accepts the Smart Store selectize bundle-delivery possible value', async () => {
+    document.body.innerHTML = `
+      <div class="form-group" ng-repeat="type in ::vm.config.productSearchDetailTypes">
+        <div class="selectize-control ng-pristine ng-untouched ng-valid single">
+          <div class="selectize-input items ng-valid has-options full has-items ng-dirty">
+            <div data-value="BUNDLEGROUP_POSSIBLE" class="item">가능</div>
+            <input type="text" autocomplete="off" tabindex="0" readonly="" />
+          </div>
+          <div class="selectize-dropdown single ng-pristine ng-untouched ng-valid" style="display: none;">
+            <div class="selectize-dropdown-content">
+              <div data-value="" data-selectable="" class="option">묶음배송</div>
+              <div data-value="BUNDLEGROUP_POSSIBLE" data-selectable="" class="option selected">가능</div>
+              <div data-value="BUNDLEGROUP_IMPOSSIBLE" data-selectable="" class="option">불가</div>
+            </div>
+          </div>
+        </div>
+        <select selectize="" class="selectized" tabindex="-1">
+          <option value="BUNDLEGROUP_POSSIBLE" selected="selected">가능</option>
+        </select>
+      </div>
+      <table>
+        <tbody>
+          <tr>
+            <td><a class="edit-link" href="/edit?originProductNo=883456">수정</a></td>
+            <td><span>묶음 가능 상품</span></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    const parser = new ProductSearchPageParser(
+      createGateway(),
+      createRegistry(),
+      new DomExplorer(document),
+      document,
+      window,
+    );
+
+    const result = await parser.collectBundleDeliveryTargets();
+
+    expect(result.products).toHaveLength(1);
+    expect(result.products[0]?.id.toString()).toBe('883456');
+    expect(result.verificationStatus).toBe('verified');
+    expect(result.note).toContain('BUNDLEGROUP_POSSIBLE');
+  });
+
+  it('does not accept the Smart Store selectize bundle-delivery impossible value', async () => {
+    document.body.innerHTML = `
+      <div class="form-group" ng-repeat="type in ::vm.config.productSearchDetailTypes">
+        <div class="selectize-control single">
+          <div class="selectize-input items has-items">
+            <div data-value="BUNDLEGROUP_IMPOSSIBLE" class="item">불가</div>
+          </div>
+          <div class="selectize-dropdown single" style="display: none;">
+            <div class="selectize-dropdown-content">
+              <div data-value="" data-selectable="" class="option">묶음배송</div>
+              <div data-value="BUNDLEGROUP_POSSIBLE" data-selectable="" class="option">가능</div>
+              <div data-value="BUNDLEGROUP_IMPOSSIBLE" data-selectable="" class="option selected">불가</div>
+            </div>
+          </div>
+        </div>
+        <select selectize="" class="selectized" tabindex="-1">
+          <option value="BUNDLEGROUP_IMPOSSIBLE" selected="selected">불가</option>
+        </select>
+      </div>
+      <table>
+        <tbody>
+          <tr>
+            <td><a class="edit-link" href="/edit?originProductNo=983456">수정</a></td>
+            <td><span>묶음 불가 상품</span></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    const parser = new ProductSearchPageParser(
+      createGateway(),
+      createRegistry(),
+      new DomExplorer(document),
+      document,
+      window,
+    );
+
+    const result = await parser.collectBundleDeliveryTargets();
+
+    expect(result.products).toEqual([]);
+    expect(result.note).toContain('Please apply the filter manually');
+  });
+
   it('does not use edit action text as the product name', async () => {
     document.body.innerHTML = `
       <input id="bundle-filter" checked value="묶음배송" />

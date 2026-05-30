@@ -40,6 +40,7 @@ const BUNDLE_DELIVERY_TERMS = [
 ];
 
 const DELIVERY_FEE_TERMS = ["배송비", "배송비결제", "delivery fee", "deliveryfee"];
+const BUNDLE_GROUP_POSSIBLE_VALUES = ["BUNDLEGROUP_POSSIBLE"];
 const CURRENT_PAGE_FALLBACK_LIMIT = 20;
 const MAX_COLLECTION_RESULT_PAGES = 500;
 const EDIT_ACTION_READY_TIMEOUT_MS = 3_500;
@@ -419,6 +420,7 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
         "input",
         "select",
         "option",
+        "[data-value='BUNDLEGROUP_POSSIBLE']",
         "[role='option']",
         "[aria-selected='true']",
         "[aria-checked='true']",
@@ -429,6 +431,10 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     );
 
     for (const control of controls) {
+      if (isSelectedBundleGroupPossibleControl(control)) {
+        return describeElement(control);
+      }
+
       if (isSelectedBundleDeliveryControl(control)) {
         return describeElement(control);
       }
@@ -653,7 +659,11 @@ function isElementActive(element: Element): boolean {
 
   if (element instanceof HTMLSelectElement) {
     const selected = element.selectedOptions[0];
-    return containsBundleDeliveryTerm(selected?.textContent ?? element.value);
+    return (
+      isBundleGroupPossibleValue(element.value) ||
+      isBundleGroupPossibleValue(selected?.value) ||
+      containsBundleDeliveryTerm(selected?.textContent ?? element.value)
+    );
   }
 
   const attributes = [
@@ -758,6 +768,15 @@ function isSelectedBundleDeliveryControl(element: Element): boolean {
   }
 
   if (element instanceof HTMLSelectElement) {
+    if (
+      isBundleGroupPossibleValue(element.value) ||
+      Array.from(element.selectedOptions).some((option) =>
+        isBundleGroupPossibleValue(option.value),
+      )
+    ) {
+      return true;
+    }
+
     const selectedText = Array.from(element.selectedOptions)
       .map((option) => readControlDescriptor(option))
       .join(" ");
@@ -766,7 +785,11 @@ function isSelectedBundleDeliveryControl(element: Element): boolean {
   }
 
   if (element instanceof HTMLOptionElement) {
-    return element.selected && containsBundleDeliveryTerm(readControlDescriptor(element));
+    return (
+      element.selected &&
+      (isBundleGroupPossibleValue(element.value) ||
+        containsBundleDeliveryTerm(readControlDescriptor(element)))
+    );
   }
 
   const selected =
@@ -777,6 +800,57 @@ function isSelectedBundleDeliveryControl(element: Element): boolean {
     element.getAttribute("data-active") === "true";
 
   return selected && containsBundleDeliveryTerm(readControlDescriptor(element));
+}
+
+function isSelectedBundleGroupPossibleControl(element: Element): boolean {
+  if (element instanceof HTMLSelectElement) {
+    return (
+      isBundleGroupPossibleValue(element.value) ||
+      Array.from(element.selectedOptions).some((option) =>
+        isBundleGroupPossibleValue(option.value),
+      )
+    );
+  }
+
+  if (element instanceof HTMLOptionElement) {
+    return element.selected && isBundleGroupPossibleValue(element.value);
+  }
+
+  if (!isBundleGroupPossibleValue(readControlValue(element))) {
+    return false;
+  }
+
+  const descriptor = normalizeWhitespace(
+    [
+      element.getAttribute("class"),
+      element.getAttribute("aria-selected"),
+      element.getAttribute("data-selected"),
+      element.getAttribute("data-active"),
+    ].join(" "),
+  ).toLowerCase();
+
+  return (
+    descriptor.includes("item") ||
+    descriptor.includes("selected") ||
+    descriptor.includes("true")
+  );
+}
+
+function isBundleGroupPossibleValue(value: string | null | undefined): boolean {
+  const normalized = normalizeWhitespace(value).toUpperCase();
+  return BUNDLE_GROUP_POSSIBLE_VALUES.includes(normalized);
+}
+
+function readControlValue(element: Element): string {
+  const values = [
+    element.getAttribute("data-value"),
+    element.getAttribute("value"),
+    element instanceof HTMLInputElement || element instanceof HTMLSelectElement
+      ? element.value
+      : "",
+  ].map((value) => normalizeWhitespace(value));
+
+  return values.find(Boolean) ?? "";
 }
 
 function readControlDescriptor(element: Element): string {
@@ -1065,11 +1139,15 @@ function decodeURIComponentSafe(value: string): string {
 function describeElement(element: Element): string {
   const className = normalizeWhitespace(element.getAttribute("class"));
   const ariaLabel = normalizeWhitespace(element.getAttribute("aria-label"));
+  const dataValue = normalizeWhitespace(
+    element.getAttribute("data-value") ?? element.getAttribute("value"),
+  );
   const text = normalizeWhitespace(element.textContent).slice(0, 40);
   return [
     element.tagName.toLowerCase(),
     className ? `class=${className}` : "",
     ariaLabel ? `aria=${ariaLabel}` : "",
+    dataValue ? `value=${dataValue}` : "",
     text ? `text=${text}` : "",
   ]
     .filter(Boolean)
