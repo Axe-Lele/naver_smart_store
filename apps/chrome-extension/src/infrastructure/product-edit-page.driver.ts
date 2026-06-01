@@ -68,7 +68,7 @@ const PREORDER_EXPAND_READY_TIMEOUT_MS = 1_200;
 const PREORDER_ENABLED_READY_TIMEOUT_MS = 1_200;
 const SAVE_COMPLETION_TIMEOUT_MS = 20_000;
 const PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS = 15_000;
-const PRODUCT_MANAGEMENT_CLICK_RETRY_INTERVAL_MS = 2_000;
+const PRODUCT_MANAGEMENT_RETRY_INTERVAL_MS = 300;
 const FAST_POLL_MS = 80;
 const SAVE_FLOW_POLL_MS = 100;
 
@@ -2208,7 +2208,7 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
         );
       },
       SAVE_COMPLETION_TIMEOUT_MS,
-      SAVE_FLOW_POLL_MS,
+      PRODUCT_MANAGEMENT_RETRY_INTERVAL_MS,
     );
     if (isProductManagementListUrl(this.gateway.getPageUrl())) {
       return { ok: true, note: "상품관리 목록 화면 복귀를 확인했습니다." };
@@ -2267,7 +2267,7 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
 
       const reachedList = await this.waitUntil(
         () => isProductManagementListUrl(this.gateway.getPageUrl()),
-        Math.min(remainingMs, PRODUCT_MANAGEMENT_CLICK_RETRY_INTERVAL_MS),
+        Math.min(remainingMs, PRODUCT_MANAGEMENT_RETRY_INTERVAL_MS),
         SAVE_FLOW_POLL_MS,
       );
       if (reachedList) {
