@@ -68,6 +68,7 @@ const PREORDER_EXPAND_READY_TIMEOUT_MS = 1_200;
 const PREORDER_ENABLED_READY_TIMEOUT_MS = 1_200;
 const SAVE_COMPLETION_TIMEOUT_MS = 20_000;
 const PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS = 15_000;
+const PRODUCT_MANAGEMENT_CLICK_RETRY_INTERVAL_MS = 2_000;
 const FAST_POLL_MS = 80;
 const SAVE_FLOW_POLL_MS = 100;
 
@@ -2219,7 +2220,7 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
     if (!productManagementButton) {
       return {
         ok: false,
-        note: "저장 완료 화면의 상품관리 버튼(button[ng-click='vm.goSearch()'])을 찾지 못했습니다.",
+        note: "저장 완료 화면의 상품관리 버튼을 찾지 못했습니다. goSearch 속성, 상품관리 텍스트, 상품 목록 링크 fallback을 모두 확인했습니다.",
       };
     }
 
@@ -2246,14 +2247,17 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
       (element: Element) => triggerKeyboardActivation(element),
     ];
 
-    for (const clickAttempt of clickAttempts) {
+    let attemptIndex = 0;
+    while (Date.now() - startedAt < PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS) {
       if (isProductManagementListUrl(this.gateway.getPageUrl())) {
         return true;
       }
 
       const button = this.resolveProductManagementButton() ?? initialButton;
       scrollElementIntoView(button);
+      const clickAttempt = clickAttempts[attemptIndex % clickAttempts.length];
       clickAttempt(button);
+      attemptIndex += 1;
 
       const remainingMs =
         PRODUCT_MANAGEMENT_NAVIGATION_TIMEOUT_MS - (Date.now() - startedAt);
@@ -2263,7 +2267,7 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
 
       const reachedList = await this.waitUntil(
         () => isProductManagementListUrl(this.gateway.getPageUrl()),
-        Math.min(remainingMs, 1_500),
+        Math.min(remainingMs, PRODUCT_MANAGEMENT_CLICK_RETRY_INTERVAL_MS),
         SAVE_FLOW_POLL_MS,
       );
       if (reachedList) {
@@ -2377,6 +2381,10 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
       '[role="button"][data-ng-click*="goSearch"]',
       '[ng-click*="goSearch"]',
       '[data-ng-click*="goSearch"]',
+      'a[href*="origin-list"]',
+      'a[href*="product-list"]',
+      'a[href*="products/list"]',
+      'a[href*="#/products"]',
     ]) {
       const explicit = Array.from(this.documentRef.querySelectorAll(selector)).find(
         (element) =>
@@ -2389,13 +2397,16 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
       }
     }
 
-    return Array.from(this.documentRef.querySelectorAll("button, a, [role='button']"))
+    const textMatches = Array.from(this.documentRef.querySelectorAll("button, a, [role='button']"))
       .filter((element) => isVisible(element) && !isDisabled(element))
-      .find(
+      .filter(
         (element) =>
           isProductManagementReturnControl(element, this.documentRef) &&
-          isSaveCompletionContext(element),
+          isSaveCompletionContext(element) &&
+          !isNavigationLikeReturnControl(element),
       );
+
+    return textMatches[0];
   }
 
   private isConversionLocked(surface: ConversionSurface): boolean {
@@ -2491,6 +2502,10 @@ function isSaveCompletionContext(element: Element): boolean {
   let current: Element | null = element;
 
   for (let depth = 0; current && depth < 6; depth += 1) {
+    if (current instanceof HTMLBodyElement || current instanceof HTMLHtmlElement) {
+      return false;
+    }
+
     const text = normalizeWhitespace(current.textContent);
     const hasProductManagement =
       text.includes("상품관리") || text.includes("상품 관리");
@@ -2510,6 +2525,27 @@ function isSaveCompletionContext(element: Element): boolean {
   }
 
   return false;
+}
+
+function isNavigationLikeReturnControl(element: Element): boolean {
+  const navigationRoot = element.closest(
+    [
+      "aside",
+      "nav",
+      "[role='navigation']",
+      ".sidebar",
+      ".side-bar",
+      ".lnb",
+      ".snb",
+      ".menu",
+    ].join(","),
+  );
+
+  if (!navigationRoot) {
+    return false;
+  }
+
+  return !isSaveCompletionContext(navigationRoot);
 }
 
 function isProductManagementReturnControl(

@@ -81,6 +81,60 @@ describe("ProductEditPageDriver save return", () => {
     expect(sideNavigationClicks).toBe(0);
     expect(currentUrl).toBe("https://sell.smartstore.naver.com/#/products");
   });
+
+  it("falls back to the save-completion product management text button when goSearch is not exposed", async () => {
+    let currentUrl =
+      "https://sell.smartstore.naver.com/#/products/origin-edit/1234567890";
+    let sideNavigationClicks = 0;
+    let saveCompletionClicks = 0;
+
+    document.body.innerHTML = `
+      <aside>
+        <button id="sideProductManagement" type="button">상품관리</button>
+      </aside>
+      <section name="preOrder">
+        <strong>예약구매</strong>
+        <label for="preOrder1_1">설정함</label>
+        <input id="preOrder1_1" name="preOrder1" value="true" type="radio" />
+        <label for="preOrder1_0">설정안함</label>
+        <input id="preOrder1_0" name="preOrder1" value="false" type="radio" />
+        <span>주문기간</span>
+      </section>
+      <button id="saveButton" type="button">저장하기</button>
+      <div id="saveResult"></div>
+    `;
+
+    document
+      .querySelector("#sideProductManagement")
+      ?.addEventListener("click", () => {
+        sideNavigationClicks += 1;
+      });
+    document.querySelector("#saveButton")?.addEventListener("click", () => {
+      document.querySelector("#saveResult")!.innerHTML = `
+        <section id="saveComplete">
+          <p>상품 수정 저장이 완료되었습니다.</p>
+          <button id="saveCompletionProductManagement" type="button">
+            상품관리
+          </button>
+        </section>
+      `;
+      document
+        .querySelector("#saveCompletionProductManagement")
+        ?.addEventListener("click", () => {
+          saveCompletionClicks += 1;
+          currentUrl = "https://sell.smartstore.naver.com/#/products/origin-list";
+        });
+    });
+
+    const driver = createDriver(() => currentUrl);
+
+    const result = await driver.applyPreorderChangePlan(createPlan());
+
+    expect(result.state, result.message).toBe(ProductProcessingState.SUCCEEDED);
+    expect(saveCompletionClicks).toBe(1);
+    expect(sideNavigationClicks).toBe(0);
+    expect(currentUrl).toBe("https://sell.smartstore.naver.com/#/products/origin-list");
+  });
 });
 
 function createDriver(getPageUrl: () => string): ProductEditPageDriver {
