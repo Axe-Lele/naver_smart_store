@@ -54,6 +54,7 @@ export type ChromeLaunchOptions = {
   extensionPath?: string;
   disableExtensionsExcept?: boolean;
   restartExistingUserDataDir?: boolean;
+  clearStartupSession?: boolean;
 };
 
 export async function resolveChromeExecutablePath(): Promise<string | null> {
@@ -116,6 +117,13 @@ export async function openUrlInChrome(
     await terminateChromeProcessesForUserDataDir(options.userDataDir);
   }
 
+  if (
+    (options.clearStartupSession || options.restartExistingUserDataDir) &&
+    options.userDataDir
+  ) {
+    clearChromeStartupSession(options.userDataDir, options.profileDirectory);
+  }
+
   await new Promise<void>((resolve, reject) => {
     const child = spawn(chromePath, buildChromeLaunchArgs(target, options), {
       detached: true,
@@ -131,6 +139,47 @@ export async function openUrlInChrome(
   });
 
   return chromePath;
+}
+
+export function clearChromeStartupSession(
+  userDataDir: string,
+  profileDirectory?: string,
+): void {
+  const profileDir = path.resolve(
+    userDataDir,
+    profileDirectory && profileDirectory.trim().length > 0
+      ? profileDirectory
+      : 'Default',
+  );
+  const sessionsDir = path.join(profileDir, 'Sessions');
+
+  removeChromeSessionFiles(sessionsDir, /^(Session|Tabs)_/i);
+  removeChromeSessionFiles(profileDir, /^(Current|Last) (Session|Tabs)$/i);
+}
+
+function removeChromeSessionFiles(directory: string, pattern: RegExp): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(directory);
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!pattern.test(entry)) {
+      continue;
+    }
+
+    const target = path.join(directory, entry);
+    try {
+      const stat = fs.statSync(target);
+      if (stat.isFile()) {
+        fs.rmSync(target, { force: true });
+      }
+    } catch {
+      // Best effort only. Chrome may still hold a session file briefly.
+    }
+  }
 }
 
 async function terminateChromeProcessesForUserDataDir(

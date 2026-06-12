@@ -1,8 +1,13 @@
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 
 import { describe, expect, it } from 'vitest';
 
-import { buildChromeLaunchArgs } from '../../apps/desktop-electron/src/main/chrome-launcher.js';
+import {
+  buildChromeLaunchArgs,
+  clearChromeStartupSession,
+} from '../../apps/desktop-electron/src/main/chrome-launcher.js';
 
 describe('buildChromeLaunchArgs', () => {
   it('opens seller center in regular Chrome without forcing a profile or extension', () => {
@@ -105,5 +110,42 @@ describe('buildChromeLaunchArgs', () => {
 
     expect(args).toContain(`--disable-extensions-except=${path.resolve(extensionPath)}`);
     expect(args).toContain(`--load-extension=${path.resolve(extensionPath)}`);
+  });
+
+  it('clears restored tab session files without deleting profile data', () => {
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-store-chrome-'));
+    const profileDir = path.join(userDataDir, 'Default');
+    const sessionsDir = path.join(profileDir, 'Sessions');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+
+    const filesToRemove = [
+      path.join(sessionsDir, 'Session_123'),
+      path.join(sessionsDir, 'Tabs_123'),
+      path.join(profileDir, 'Current Session'),
+      path.join(profileDir, 'Current Tabs'),
+      path.join(profileDir, 'Last Session'),
+      path.join(profileDir, 'Last Tabs'),
+    ];
+    const filesToKeep = [
+      path.join(profileDir, 'Cookies'),
+      path.join(profileDir, 'Preferences'),
+      path.join(sessionsDir, 'Session Storage'),
+    ];
+
+    for (const file of [...filesToRemove, ...filesToKeep]) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'test');
+    }
+
+    clearChromeStartupSession(userDataDir, 'Default');
+
+    for (const file of filesToRemove) {
+      expect(fs.existsSync(file), file).toBe(false);
+    }
+    for (const file of filesToKeep) {
+      expect(fs.existsSync(file), file).toBe(true);
+    }
+
+    fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 });
