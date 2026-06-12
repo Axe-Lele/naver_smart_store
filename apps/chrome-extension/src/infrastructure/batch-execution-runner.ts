@@ -198,6 +198,10 @@ export class BatchExecutionRunner {
         return stoppedAfterReady;
       }
 
+      if (checkpoint.refreshTargetsOnList) {
+        return this.refreshTargetsFromCurrentListOrNavigate(checkpoint, policy);
+      }
+
       if (checkpoint.currentIndex >= checkpoint.targets.length) {
         return this.extendFromNextResultPageOrComplete(checkpoint, policy);
       }
@@ -252,20 +256,17 @@ export class BatchExecutionRunner {
           ? prepared
           : await this.driver.applyPreorderChangePlan(prepared);
 
-      checkpoint.results = mergeResults(checkpoint.results, [serializeResult(result)]);
-      if (result.state !== ProductProcessingState.STOPPED) {
-        checkpoint.currentIndex += 1;
+      if (result.state === ProductProcessingState.STOPPED) {
+        return this.recoverFromStoppedTarget(checkpoint, currentTarget, result, policy);
       }
+
+      checkpoint.results = mergeResults(checkpoint.results, [serializeResult(result)]);
+      checkpoint.currentIndex += 1;
       checkpoint.updatedAt = new Date().toISOString();
       checkpoint.consecutiveFailureCount =
         result.state === ProductProcessingState.SUCCEEDED
           ? 0
           : checkpoint.consecutiveFailureCount + 1;
-
-      if (result.state === ProductProcessingState.STOPPED) {
-        checkpoint.status = "stopped";
-        checkpoint.stopRequested = true;
-      }
 
       const stoppedAfterApply = await this.stopIfRequested(checkpoint);
       if (stoppedAfterApply) {
@@ -317,6 +318,153 @@ export class BatchExecutionRunner {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  private async recoverFromStoppedTarget(
+    checkpoint: BatchExecutionCheckpoint,
+    target: PersistedBatchTarget,
+    result: {
+      productId: ProductId;
+      state: ProductProcessingState;
+      message: string;
+      retryable: boolean;
+      plan?: { notes: string[] };
+      artifacts: Array<{ kind: "screenshot" | "html" | "log"; path?: string; note: string }>;
+    },
+    policy: RunPolicy,
+  ): Promise<BatchExecutionCheckpoint> {
+    const recovered: BatchExecutionCheckpoint = {
+      ...checkpoint,
+      status: "running",
+      stopRequested: false,
+      refreshTargetsOnList: true,
+      currentIndex: checkpoint.currentIndex + 1,
+      updatedAt: new Date().toISOString(),
+      consecutiveFailureCount: checkpoint.consecutiveFailureCount + 1,
+      results: mergeResults(checkpoint.results, [
+        {
+          ...serializeResult(result),
+          state: ProductProcessingState.FAILED,
+          retryable: true,
+          message: `${result.message} 실패 상품은 건너뛰고 상품목록에서 묶음배송 대상을 다시 수집합니다.`,
+        },
+      ]),
+    };
+
+    if (recovered.consecutiveFailureCount >= recovered.stopOnConsecutiveFailures) {
+      recovered.status = "stopped";
+      recovered.stopRequested = true;
+      recovered.refreshTargetsOnList = false;
+      recovered.results = mergeResults(recovered.results, [
+        {
+          productId: target.productId,
+          state: ProductProcessingState.STOPPED,
+          message: `${recovered.consecutiveFailureCount}건 연속으로 실패해 안전을 위해 작업을 멈췄습니다.`,
+          retryable: false,
+          planNotes: [],
+          artifacts: [],
+        },
+      ]);
+    }
+
+    await this.batchStore.save(recovered);
+    await this.progressStore.save(
+      toProgressSnapshot(
+        recovered,
+        recovered.status === "stopped" ? "stopped" : "executing",
+        recovered.status === "stopped"
+          ? `${recovered.consecutiveFailureCount}건 연속으로 실패해 안전을 위해 작업을 멈췄습니다.`
+          : `상품 ${target.productId} 처리에 실패했습니다. 상품목록에서 묶음배송 대상을 다시 수집합니다.`,
+      ),
+    );
+
+    if (recovered.status === "stopped") {
+      return recovered;
+    }
+
+    return this.refreshTargetsFromCurrentListOrNavigate(recovered, policy);
+  }
+
+  private async refreshTargetsFromCurrentListOrNavigate(
+    checkpoint: BatchExecutionCheckpoint,
+    policy: RunPolicy,
+  ): Promise<BatchExecutionCheckpoint> {
+    if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
+      this.windowRef.location.assign(checkpoint.searchPageUrl);
+      this.resumeTimerId = this.windowRef.setTimeout(() => {
+        this.resumeTimerId = undefined;
+        void this.continueIfNeeded(policy);
+      }, ROUTE_RESUME_DELAY_MS);
+
+      const returning: BatchExecutionCheckpoint = {
+        ...checkpoint,
+        refreshTargetsOnList: true,
+        updatedAt: new Date().toISOString(),
+      };
+      await this.batchStore.save(returning);
+      await this.progressStore.save(
+        toProgressSnapshot(
+          returning,
+          "executing",
+          "실패 후 상품관리 목록으로 돌아가 묶음배송 대상을 다시 수집합니다.",
+        ),
+      );
+      return returning;
+    }
+
+    await this.parser.prepareBundleDeliverySearchFilters();
+    const parsed = await this.parser.collectBundleDeliveryTargets({
+      pagination: "current-page",
+    });
+    if (parsed.verificationStatus !== "verified") {
+      return this.stopAtPaginationFailure(
+        checkpoint,
+        `실패 후 상품목록으로 돌아왔지만 묶음배송 대상을 다시 확인하지 못해 작업을 멈췄습니다. ${parsed.note}`,
+      );
+    }
+
+    const processedProductIds = new Set(
+      checkpoint.results.map((result) => result.productId),
+    );
+    const processedTargets = checkpoint.targets.slice(0, checkpoint.currentIndex);
+    const processedTargetIds = new Set(
+      processedTargets.map((target) => target.productId),
+    );
+    const refreshedTargets = filterSelectedProducts(
+      parsed.products,
+      checkpoint.selectedProductIds,
+    )
+      .filter((product) => !processedProductIds.has(product.id.toString()))
+      .filter((product) => !processedTargetIds.has(product.id.toString()))
+      .map((product) => serializeTarget(product));
+
+    const refreshed: BatchExecutionCheckpoint = {
+      ...checkpoint,
+      status: "running",
+      stopRequested: false,
+      refreshTargetsOnList: false,
+      currentIndex: processedTargets.length,
+      targets: [...processedTargets, ...refreshedTargets],
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.batchStore.save(refreshed);
+    await this.progressStore.save(
+      toProgressSnapshot(
+        refreshed,
+        "executing",
+        refreshedTargets.length > 0
+          ? `상품목록에서 묶음배송 대상 ${refreshedTargets.length}건을 다시 수집했습니다.`
+          : "상품목록에서 새 묶음배송 대상이 없어 다음 페이지를 확인합니다.",
+      ),
+    );
+
+    if (refreshed.currentIndex >= refreshed.targets.length) {
+      return this.extendFromNextResultPageOrComplete(refreshed, policy);
+    }
+
+    this.scheduleNavigationToCurrentTarget(refreshed, policy);
+    return refreshed;
   }
 
   private async extendFromNextResultPageOrComplete(

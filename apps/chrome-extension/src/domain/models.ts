@@ -103,6 +103,7 @@ export interface BatchExecutionCheckpoint {
   stopOnConsecutiveFailures: number;
   requiredOptions?: RequiredOption[];
   selectedProductIds?: string[];
+  refreshTargetsOnList?: boolean;
   targets: PersistedBatchTarget[];
   results: PersistedProcessingResult[];
 }
