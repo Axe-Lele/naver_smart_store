@@ -161,7 +161,7 @@ function createCheckpoint(searchPageUrl: string): BatchExecutionCheckpoint {
     delayMs: 0,
     skipSucceeded: true,
     consecutiveFailureCount: 0,
-    stopOnConsecutiveFailures: 20,
+    stopOnConsecutiveFailures: 10,
     targets: [createTarget("111"), createTarget("222")],
     results: [],
   };

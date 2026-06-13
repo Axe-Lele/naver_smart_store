@@ -18,6 +18,6 @@ export const DEFAULT_RUN_POLICY: RunPolicy = {
   maxItems: 100,
   retryFailedOnly: false,
   resumeFromCheckpoint: true,
-  stopOnConsecutiveFailures: 20,
+  stopOnConsecutiveFailures: 10,
   timezone: "Asia/Seoul",
 };

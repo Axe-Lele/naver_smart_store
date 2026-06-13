@@ -6,7 +6,7 @@ export const runPolicySchema = z.object({
   delayMs: z.number().int().min(0).default(1_500),
   concurrency: z.number().int().min(1).max(8).default(1),
   headless: z.boolean().default(false),
-  consecutiveFailureLimit: z.number().int().min(1).max(100).default(20),
+  consecutiveFailureLimit: z.number().int().min(1).max(100).default(10),
   productsUrl: z.string().url(),
   captureScreenshotOnFailure: z.boolean().default(true),
   captureHtmlOnFailure: z.boolean().default(true),

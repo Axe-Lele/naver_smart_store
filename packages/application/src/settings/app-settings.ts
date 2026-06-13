@@ -13,6 +13,8 @@ export const DEFAULT_PREORDER_REQUIRED_OPTIONS = [
   },
 ];
 
+export const MAX_CONSECUTIVE_FAILURE_LIMIT = 10;
+
 const legacyProductsUrls = new Set([
   'https://sell.smartstore.naver.com',
   'https://sell.smartstore.naver.com/',
@@ -37,7 +39,7 @@ export const appSettingsSchema = z
     headless: z.boolean().default(false),
     delayMs: z.number().int().min(0).default(1_500),
     concurrency: z.number().int().min(1).max(8).default(1),
-    consecutiveFailureLimit: z.number().int().min(1).max(100).default(20),
+    consecutiveFailureLimit: z.number().int().min(1).max(100).default(10),
     captureScreenshotOnFailure: z.boolean().default(true),
     captureHtmlOnFailure: z.boolean().default(true),
     selectorProfileId: z.string().trim().min(1).default('smartstore-default'),
@@ -87,7 +89,10 @@ export function buildRunPolicyFromSettings(
     delayMs: settings.delayMs,
     concurrency: settings.concurrency,
     headless: settings.headless,
-    consecutiveFailureLimit: settings.consecutiveFailureLimit,
+    consecutiveFailureLimit: Math.min(
+      settings.consecutiveFailureLimit,
+      MAX_CONSECUTIVE_FAILURE_LIMIT,
+    ),
     productsUrl: settings.productsUrl,
     captureScreenshotOnFailure: settings.captureScreenshotOnFailure,
     captureHtmlOnFailure: settings.captureHtmlOnFailure,

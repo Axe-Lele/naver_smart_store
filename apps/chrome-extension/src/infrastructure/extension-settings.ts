@@ -12,6 +12,8 @@ const RequiredOptionSchema = z.object({
   value: z.string().trim().min(1).max(200),
 });
 
+const MAX_STOP_ON_CONSECUTIVE_FAILURES = 10;
+
 export const ExtensionSettingsSchema = z.object({
   sellerCenterOrigin: z.string().url().default("https://sell.smartstore.naver.com"),
   hybridBridgeUrl: z.string().url().default("http://127.0.0.1:45873"),
@@ -85,7 +87,10 @@ export function toRunPolicy(
     maxItems: settings.maxItems,
     retryFailedOnly: false,
     resumeFromCheckpoint: true,
-    stopOnConsecutiveFailures: settings.stopOnConsecutiveFailures,
+    stopOnConsecutiveFailures: Math.min(
+      settings.stopOnConsecutiveFailures,
+      MAX_STOP_ON_CONSECUTIVE_FAILURES,
+    ),
     timezone: settings.timezone,
     requiredOptions: normalizeRequiredOptions(settings.requiredOptions),
   };

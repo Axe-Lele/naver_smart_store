@@ -141,7 +141,7 @@ export class DesktopAppRuntime {
         headless: false,
         delayMs: 1_500,
         concurrency: 1,
-        consecutiveFailureLimit: 20,
+        consecutiveFailureLimit: 10,
         captureScreenshotOnFailure: true,
         captureHtmlOnFailure: true,
         selectorProfileId: 'smartstore-default',
