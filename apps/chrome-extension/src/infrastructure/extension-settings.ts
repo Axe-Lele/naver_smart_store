@@ -12,6 +12,7 @@ const RequiredOptionSchema = z.object({
   value: z.string().trim().min(1).max(200),
 });
 
+// Keep the extension-side runner aligned with the desktop app safety cap.
 const MAX_STOP_ON_CONSECUTIVE_FAILURES = 10;
 
 export const ExtensionSettingsSchema = z.object({

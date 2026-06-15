@@ -199,6 +199,8 @@ export class BatchExecutionRunner {
       }
 
       if (checkpoint.refreshTargetsOnList) {
+        // A previous edit flow failed after leaving the list; rebuild targets from
+        // the current product list instead of trusting stale row positions.
         return this.refreshTargetsFromCurrentListOrNavigate(checkpoint, policy);
       }
 
@@ -333,6 +335,8 @@ export class BatchExecutionRunner {
     },
     policy: RunPolicy,
   ): Promise<BatchExecutionCheckpoint> {
+    // Treat a per-product STOPPED result as a retryable failure, then return to
+    // the original list URL and collect the remaining bundle-delivery rows again.
     const recovered: BatchExecutionCheckpoint = {
       ...checkpoint,
       status: "running",
@@ -390,6 +394,8 @@ export class BatchExecutionRunner {
     policy: RunPolicy,
   ): Promise<BatchExecutionCheckpoint> {
     if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
+      // Smart Store can leave us on the edit page after save/navigation failures.
+      // Re-enter through the saved list URL before touching any more products.
       this.windowRef.location.assign(checkpoint.searchPageUrl);
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
@@ -412,6 +418,8 @@ export class BatchExecutionRunner {
       return returning;
     }
 
+    // Re-apply the safe search filters before rebuilding the queue; otherwise a
+    // stale or cleared list could make the runner operate on unintended rows.
     await this.parser.prepareBundleDeliverySearchFilters();
     const parsed = await this.parser.collectBundleDeliveryTargets({
       pagination: "current-page",

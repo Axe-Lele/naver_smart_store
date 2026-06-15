@@ -13,6 +13,8 @@ export const DEFAULT_PREORDER_REQUIRED_OPTIONS = [
   },
 ];
 
+// Older saved settings can still contain higher values; execution policy caps
+// them so list-recovery retries cannot accidentally run for too long.
 export const MAX_CONSECUTIVE_FAILURE_LIMIT = 10;
 
 const legacyProductsUrls = new Set([

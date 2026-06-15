@@ -103,6 +103,7 @@ export interface BatchExecutionCheckpoint {
   stopOnConsecutiveFailures: number;
   requiredOptions?: RequiredOption[];
   selectedProductIds?: string[];
+  // Set after a failed edit/save flow so the next resume starts from the product list again.
   refreshTargetsOnList?: boolean;
   targets: PersistedBatchTarget[];
   results: PersistedProcessingResult[];
