@@ -13,8 +13,8 @@ export const DEFAULT_PREORDER_REQUIRED_OPTIONS = [
   },
 ];
 
-// Older saved settings can still contain higher values; execution policy caps
-// them so list-recovery retries cannot accidentally run for too long.
+// 기존 설치본에서 저장된 설정값이 10보다 클 수 있어도 실제 실행 정책에서는 여기서 제한합니다.
+// 상품목록 복구가 계속 실패할 때 무한 반복처럼 보이지 않게 하는 최종 안전장치입니다.
 export const MAX_CONSECUTIVE_FAILURE_LIMIT = 10;
 
 const legacyProductsUrls = new Set([
@@ -91,6 +91,7 @@ export function buildRunPolicyFromSettings(
     delayMs: settings.delayMs,
     concurrency: settings.concurrency,
     headless: settings.headless,
+    // 저장된 설정값은 보존하되, 실제 실행에는 안전 상한을 적용합니다.
     consecutiveFailureLimit: Math.min(
       settings.consecutiveFailureLimit,
       MAX_CONSECUTIVE_FAILURE_LIMIT,

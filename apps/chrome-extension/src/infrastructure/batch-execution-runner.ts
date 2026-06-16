@@ -37,6 +37,9 @@ type BatchExecutionOptions = {
 };
 
 export class BatchExecutionRunner {
+  // 이 runner는 확장 프로그램 안에서 동작하는 배치 실행기입니다.
+  // 상품목록 DOM을 읽고, 수정 버튼을 누르고, 수정 페이지에서 예약구매를 적용합니다.
+  // 브라우저 탭 이동이 섞이기 때문에 매 단계마다 checkpoint를 저장해 중지/새로고침/실패 복구가 가능하게 합니다.
   private isRunning = false;
 
   private navigationTimerId?: number;
@@ -59,6 +62,8 @@ export class BatchExecutionRunner {
   ): Promise<BatchExecutionCheckpoint> {
     this.clearScheduledNavigation();
 
+    // 시작 시점에는 반드시 현재 상품목록 화면에서 묶음배송 조건이 검증된 상품만 수집합니다.
+    // 여기서 검증에 실패하면 전체 상품을 잘못 건드릴 수 있으므로 실행 자체를 막습니다.
     const parsed = await this.parser.collectBundleDeliveryTargets({
       pagination: "current-page",
     });
@@ -69,6 +74,7 @@ export class BatchExecutionRunner {
     const selectedIds = new Set(
       (options.selectedProductIds ?? []).map((productId) => productId.trim()),
     );
+    // 운영자가 상품을 직접 선택했다면 선택한 상품만 대상으로 삼고, 아니면 현재 검색 결과 전체를 사용합니다.
     const products =
       selectedIds.size > 0
         ? parsed.products.filter((product) => selectedIds.has(product.id.toString()))
@@ -88,6 +94,8 @@ export class BatchExecutionRunner {
       : [];
     const successfulIds = new Set(previousSuccessfulResults.map((result) => result.productId));
 
+    // 이어하기 모드에서는 이미 성공한 상품을 targets에 다시 넣지 않습니다.
+    // 결과 기록은 보존해서 진행률과 중복 처리 방지에 계속 사용합니다.
     const results: PersistedProcessingResult[] = previousSuccessfulResults;
     const targets: PersistedBatchTarget[] = [];
     const requiredOptions = normalizeRequiredOptions(
@@ -107,6 +115,7 @@ export class BatchExecutionRunner {
     const checkpoint: BatchExecutionCheckpoint = {
       status: "running",
       mode: "execute",
+      // 실패 복구와 다음 페이지 확인은 이 URL을 기준으로 상품관리 목록에 다시 진입합니다.
       searchPageUrl: this.gateway.getPageUrl(),
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -191,6 +200,7 @@ export class BatchExecutionRunner {
 
     this.isRunning = true;
     try {
+      // Smart Store 화면은 Angular/AG Grid 렌더링이 늦을 수 있어 DOM 준비를 먼저 기다립니다.
       await this.waitStrategy.waitForDocumentReady(8_000);
 
       const stoppedAfterReady = await this.stopIfRequested(checkpoint);
@@ -199,8 +209,8 @@ export class BatchExecutionRunner {
       }
 
       if (checkpoint.refreshTargetsOnList) {
-        // A previous edit flow failed after leaving the list; rebuild targets from
-        // the current product list instead of trusting stale row positions.
+        // 이전 수정/저장 흐름이 목록을 벗어난 상태에서 실패한 경우입니다.
+        // AG Grid row-index나 수정 버튼 위치는 화면 이동 후 쉽게 바뀌므로, 기존 위치를 믿지 않고 목록에서 다시 수집합니다.
         return this.refreshTargetsFromCurrentListOrNavigate(checkpoint, policy);
       }
 
@@ -217,6 +227,8 @@ export class BatchExecutionRunner {
       const isOnTargetEditPage = isProductEditUrl(currentUrl);
 
       if (!isOnTargetEditPage) {
+        // 아직 수정 페이지가 아니라면 현재 상품의 수정 버튼을 다시 누르도록 예약합니다.
+        // 직접 즉시 호출하지 않고 timer를 쓰는 이유는 SPA 라우팅과 DOM 갱신 사이에 한 틱 여유를 주기 위해서입니다.
         checkpoint.updatedAt = new Date().toISOString();
         await this.batchStore.save(checkpoint);
         await this.progressStore.save(
@@ -248,6 +260,8 @@ export class BatchExecutionRunner {
       this.driver.configureRequiredOptions(
         checkpoint.requiredOptions ?? policy.requiredOptions,
       );
+      // 수정 페이지 driver가 실제 예약구매 변경 계획을 만들고, execute 모드에서는 곧바로 적용합니다.
+      // 여기서 STOPPED가 나오면 저장 완료/목록 복귀 확인 실패처럼 상품별 복구가 필요한 상태로 봅니다.
       const prepared = await this.driver.preparePreorderChangePlan(product, {
         ...policy,
         dryRun: false,
@@ -276,6 +290,8 @@ export class BatchExecutionRunner {
       }
 
       if (checkpoint.consecutiveFailureCount >= checkpoint.stopOnConsecutiveFailures) {
+        // 같은 유형의 실패가 계속 반복되면 셀렉터 문제나 로그인/권한 문제일 가능성이 높습니다.
+        // 이때는 계속 다음 상품으로 넘어가지 않고 운영자가 확인할 수 있게 배치를 멈춥니다.
         checkpoint.status = "stopped";
         checkpoint.stopRequested = true;
         checkpoint.results = mergeResults(checkpoint.results, [
@@ -335,8 +351,9 @@ export class BatchExecutionRunner {
     },
     policy: RunPolicy,
   ): Promise<BatchExecutionCheckpoint> {
-    // Treat a per-product STOPPED result as a retryable failure, then return to
-    // the original list URL and collect the remaining bundle-delivery rows again.
+    // 상품 하나의 수정/저장/목록복귀 단계가 STOPPED로 끝난 경우의 복구 경로입니다.
+    // 전체 배치를 즉시 끝내지 않고 해당 상품은 실패 처리한 뒤, 원래 상품목록 URL로 돌아가 남은 묶음배송 대상을 다시 수집합니다.
+    // 단, 이 복구도 연속 실패 횟수에 포함해 최대 10회 이상 반복되지 않게 합니다.
     const recovered: BatchExecutionCheckpoint = {
       ...checkpoint,
       status: "running",
@@ -356,6 +373,8 @@ export class BatchExecutionRunner {
     };
 
     if (recovered.consecutiveFailureCount >= recovered.stopOnConsecutiveFailures) {
+      // 복구 가능한 실패라도 지정 횟수를 넘으면 자동화가 같은 화면에서 헤매고 있다는 뜻입니다.
+      // refreshTargetsOnList를 끄고 stopped로 저장해 다음 resume이 다시 루프를 만들지 않게 합니다.
       recovered.status = "stopped";
       recovered.stopRequested = true;
       recovered.refreshTargetsOnList = false;
@@ -394,8 +413,8 @@ export class BatchExecutionRunner {
     policy: RunPolicy,
   ): Promise<BatchExecutionCheckpoint> {
     if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
-      // Smart Store can leave us on the edit page after save/navigation failures.
-      // Re-enter through the saved list URL before touching any more products.
+      // 저장 후 확인 또는 상품관리 복귀가 실패하면 탭은 여전히 수정 페이지에 남아 있을 수 있습니다.
+      // 다음 상품을 처리하기 전에 시작 당시 저장해 둔 상품목록 URL로 다시 들어가 안전한 기준점을 회복합니다.
       this.windowRef.location.assign(checkpoint.searchPageUrl);
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
@@ -418,8 +437,8 @@ export class BatchExecutionRunner {
       return returning;
     }
 
-    // Re-apply the safe search filters before rebuilding the queue; otherwise a
-    // stale or cleared list could make the runner operate on unintended rows.
+    // 상품목록으로 돌아온 뒤에는 날짜/상세검색/묶음배송 가능 조건을 다시 맞춥니다.
+    // 필터가 풀린 상태에서 수집하면 전체 상품을 처리할 위험이 있으므로, 검증 실패 시 중단합니다.
     await this.parser.prepareBundleDeliverySearchFilters();
     const parsed = await this.parser.collectBundleDeliveryTargets({
       pagination: "current-page",
@@ -434,6 +453,8 @@ export class BatchExecutionRunner {
     const processedProductIds = new Set(
       checkpoint.results.map((result) => result.productId),
     );
+    // currentIndex 이전 target은 이미 처리했거나 실패 처리한 대상입니다.
+    // 재수집 결과에 다시 나타나도 targets 뒤에 중복으로 붙이지 않습니다.
     const processedTargets = checkpoint.targets.slice(0, checkpoint.currentIndex);
     const processedTargetIds = new Set(
       processedTargets.map((target) => target.productId),
@@ -480,6 +501,7 @@ export class BatchExecutionRunner {
     policy: RunPolicy,
   ): Promise<BatchExecutionCheckpoint> {
     if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
+      // 현재 페이지의 대상이 끝났는데 수정 화면에 남아 있다면, 다음 페이지 버튼을 누르기 전에 목록으로 돌아갑니다.
       this.windowRef.location.assign(checkpoint.searchPageUrl);
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
@@ -499,6 +521,8 @@ export class BatchExecutionRunner {
 
     const knownProductIds = buildKnownProductIds(checkpoint);
 
+    // 현재 페이지에서 더 처리할 상품이 없으면 AG Grid pagination의 다음 페이지를 확인합니다.
+    // 페이지 이동이 비정상적으로 반복되는 상황을 막기 위해 batch-target-expansion의 제한 횟수까지만 시도합니다.
     for (let attempt = 0; attempt < MAX_PAGINATION_ADVANCE_ATTEMPTS; attempt += 1) {
       const moved = await this.parser.moveToNextResultPage();
       if (!moved.ok) {
@@ -522,6 +546,7 @@ export class BatchExecutionRunner {
       );
 
       if (nextTargets.length === 0) {
+        // 다음 페이지가 있어도 이미 처리한 상품뿐이면 계속 넘깁니다.
         await this.progressStore.save(
           toProgressSnapshot(
             checkpoint,
@@ -598,6 +623,7 @@ export class BatchExecutionRunner {
 
     this.clearScheduledNavigation();
 
+    // 수정 버튼 클릭은 DOM 갱신 직후 바로 실행하면 실패할 수 있어 짧은 timer 뒤에 수행합니다.
     this.navigationTimerId = this.windowRef.setTimeout(() => {
       this.navigationTimerId = undefined;
       void this.navigateToCurrentTargetIfStillRunning(policy);
@@ -619,6 +645,7 @@ export class BatchExecutionRunner {
     }
 
     if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
+      // 수정 페이지나 다른 라우트에 있다면 먼저 목록 URL로 복귀하고, 복귀 후 continueIfNeeded가 다시 이어갑니다.
       this.windowRef.location.assign(checkpoint.searchPageUrl);
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
@@ -629,6 +656,8 @@ export class BatchExecutionRunner {
 
     const opened = await this.parser.openEditForProduct(target.productId);
     if (!opened) {
+      // 목록에는 왔지만 해당 상품의 수정 버튼을 못 찾은 경우입니다.
+      // 검색 조건/권한/페이지 렌더링 문제일 수 있어 해당 상품만 실패 처리하고 다음 대상으로 넘어갑니다.
       await this.markCurrentTargetFailedAndContinue(
         checkpoint,
         target,
@@ -648,6 +677,8 @@ export class BatchExecutionRunner {
   private async waitForEditNavigationAfterOpen(): Promise<boolean> {
     const startedAt = Date.now();
 
+    // 수정 버튼 클릭 후 SPA 라우팅이 완료될 때까지 짧은 간격으로 URL을 확인합니다.
+    // timeout 후에도 수정 URL이 아니면 continueIfNeeded가 다시 현재 상태를 보고 복구합니다.
     while (Date.now() - startedAt < EDIT_NAVIGATION_TIMEOUT_MS) {
       if (isProductEditUrl(this.gateway.getPageUrl())) {
         return true;
@@ -665,6 +696,8 @@ export class BatchExecutionRunner {
     message: string,
     policy: RunPolicy,
   ): Promise<void> {
+    // 상품목록에서 수정 버튼을 못 여는 실패는 저장 실패와 달리 목록 기준점이 이미 유지된 상태입니다.
+    // 그래서 목록 재수집 대신 현재 target만 실패로 기록하고 다음 target으로 이동합니다.
     const nextCheckpoint: BatchExecutionCheckpoint = {
       ...checkpoint,
       currentIndex: checkpoint.currentIndex + 1,
@@ -702,6 +735,7 @@ export class BatchExecutionRunner {
   }
 
   private clearScheduledNavigation(): void {
+    // 중지/재시작/복구 시 이전 timer가 남아 있으면 같은 상품을 두 번 열 수 있어 항상 정리합니다.
     if (this.navigationTimerId !== undefined) {
       this.windowRef.clearTimeout(this.navigationTimerId);
       this.navigationTimerId = undefined;
@@ -716,6 +750,8 @@ export class BatchExecutionRunner {
   private async stopIfRequested(
     checkpoint: BatchExecutionCheckpoint,
   ): Promise<BatchExecutionCheckpoint | null> {
+    // 실행 중 사용자가 중지 버튼을 누르면 storage의 최신 checkpoint와 현재 메모리 상태를 합쳐 저장합니다.
+    // 이렇게 해야 버튼을 누른 직후 처리된 결과가 사라지지 않습니다.
     if (checkpoint.stopRequested || checkpoint.status === "stopped") {
       return this.persistStoppedCheckpoint(checkpoint);
     }

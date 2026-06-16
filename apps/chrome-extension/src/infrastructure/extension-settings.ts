@@ -12,7 +12,7 @@ const RequiredOptionSchema = z.object({
   value: z.string().trim().min(1).max(200),
 });
 
-// Keep the extension-side runner aligned with the desktop app safety cap.
+// 확장 단독 실행 경로에서도 데스크톱 앱과 같은 10회 안전 제한을 적용합니다.
 const MAX_STOP_ON_CONSECUTIVE_FAILURES = 10;
 
 export const ExtensionSettingsSchema = z.object({
@@ -58,6 +58,7 @@ export const defaultExtensionSettings: ExtensionSettings =
 export function normalizeRequiredOptions(
   options?: readonly RequiredOption[] | null,
 ): RequiredOption[] {
+  // 운영자가 저장한 필수 옵션 문구가 깨졌거나 비어 있으면 기본 문구로 되돌립니다.
   const parsed = z
     .array(RequiredOptionSchema)
     .min(1)
@@ -88,6 +89,7 @@ export function toRunPolicy(
     maxItems: settings.maxItems,
     retryFailedOnly: false,
     resumeFromCheckpoint: true,
+    // 설정 스키마는 예전 저장값을 읽기 위해 100까지 허용하지만, 실행 시에는 10회로 제한합니다.
     stopOnConsecutiveFailures: Math.min(
       settings.stopOnConsecutiveFailures,
       MAX_STOP_ON_CONSECUTIVE_FAILURES,
