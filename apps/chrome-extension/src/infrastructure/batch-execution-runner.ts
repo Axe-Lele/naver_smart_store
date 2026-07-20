@@ -1005,19 +1005,28 @@ function toProgressSnapshot(
       result.state === ProductProcessingState.SUCCEEDED &&
       !targetIds.has(result.productId),
   ).length;
-  const targetCount = checkpoint.targets.length + skippedSucceededCount;
-  const defaultMessage = `진행 상황: ${checkpoint.currentIndex}/${checkpoint.targets.length}건 처리`;
+  // 진행률 분모(전체 대상 수):
+  // - 운영자가 상품을 선택해 시작한 배치면 "선택한 전체 건수"가 분모다.
+  //   targets 는 페이지를 넘기며 점진적으로 늘어나므로(첫 페이지 100건씩),
+  //   targets 길이를 그대로 쓰면 1,039건 선택에도 "4/100 · 남은 96" 처럼 보인다.
+  // - 선택 없이 시작한 배치(검색 결과 전체)는 끝까지 가봐야 총량을 알 수 있어
+  //   기존처럼 지금까지 수집된 targets 기준으로 표시한다.
+  const targetCount = checkpoint.selectedProductIds?.length
+    ? checkpoint.selectedProductIds.length
+    : checkpoint.targets.length + skippedSucceededCount;
+  const completedCount = checkpoint.results.filter((result) =>
+    [
+      ProductProcessingState.SUCCEEDED,
+      ProductProcessingState.FAILED,
+      ProductProcessingState.SKIPPED,
+    ].includes(result.state),
+  ).length;
+  const defaultMessage = `진행 상황: 전체 ${targetCount}건 중 ${completedCount}건 완료`;
   return {
     phase,
     updatedAt: checkpoint.updatedAt,
     targetCount,
-    completedCount: checkpoint.results.filter((result) =>
-      [
-        ProductProcessingState.SUCCEEDED,
-        ProductProcessingState.FAILED,
-        ProductProcessingState.SKIPPED,
-      ].includes(result.state),
-    ).length,
+    completedCount,
     results: checkpoint.results.map((result) => ({
       productId: result.productId,
       state: result.state,
@@ -1035,9 +1044,19 @@ function toProgressSnapshot(
 
 function buildNavigationMessage(checkpoint: BatchExecutionCheckpoint): string {
   const target = checkpoint.targets[checkpoint.currentIndex];
+  const totalCount = checkpoint.selectedProductIds?.length
+    ? checkpoint.selectedProductIds.length
+    : checkpoint.targets.length;
+  const completedCount = checkpoint.results.filter((result) =>
+    [
+      ProductProcessingState.SUCCEEDED,
+      ProductProcessingState.FAILED,
+      ProductProcessingState.SKIPPED,
+    ].includes(result.state),
+  ).length;
   return target
-    ? `상품 수정 화면으로 이동 중: ${target.productId}`
-    : `진행 상황: ${checkpoint.currentIndex}/${checkpoint.targets.length}건 처리`;
+    ? `상품 수정 화면으로 이동 중: ${target.productId} (전체 ${totalCount}건 중 ${completedCount}건 완료)`
+    : `진행 상황: 전체 ${totalCount}건 중 ${completedCount}건 완료`;
 }
 
 function isProductListUrl(currentUrl: string, searchPageUrl: string): boolean {
