@@ -10,7 +10,7 @@ function summarize(files) {
   const warnings = [];
 
   if (files.some((entry) => /^packages\/(core|application)\//.test(entry.file))) {
-    warnings.push('Core/application changes detected: re-run `npm run typecheck` and `npm run test`.');
+    warnings.push('Core/application changes detected: re-run `npm run typecheck`.');
   }
 
   if (files.some((entry) => /^packages\/infrastructure-playwright\//.test(entry.file))) {
@@ -25,7 +25,7 @@ function summarize(files) {
     warnings.push('Packaging/runtime changes detected: consider `npm run desktop:dist` and a Windows installer smoke test.');
   }
 
-  if (files.some((entry) => /^(AGENTS\.md|CLAUDE\.md|agent\.yaml|\.codex\/|\.claude\/|\.agents\/)/.test(entry.file))) {
+  if (files.some((entry) => /^(AGENTS\.md|CLAUDE\.md|agent\.yaml|\.codex\/|\.claude\/|\.cursor\/|\.agents\/)/.test(entry.file))) {
     warnings.push('Harness changes detected: review hook paths, agent configs, and workflow docs for cross-tool consistency.');
   }
 

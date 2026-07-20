@@ -5,11 +5,26 @@
   "description": "Bundle-delivery scoped preorder setting assistant for Smart Store seller center.",
   "action": {
     "default_title": "Smart Store Assistant",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "permissions": ["storage", "tabs", "activeTab", "scripting"],
   "host_permissions": [
     "https://sell.smartstore.naver.com/*",
+    "https://tmg023.cafe24.com/*",
+    "https://*.amazon.co.jp/*",
+    "https://api.openai.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
@@ -21,6 +36,11 @@
     {
       "matches": ["https://sell.smartstore.naver.com/*"],
       "js": ["presentation/content/content-script.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://tmg023.cafe24.com/mall/admin/*"],
+      "js": ["presentation/content/cafe24-admin-redirect.js"],
       "run_at": "document_idle"
     }
   ]

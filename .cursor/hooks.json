@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "node .codex/hooks/pre-bash-safety.cjs",
+        "event": "beforeShellExecution",
+        "description": "Block destructive shell commands and remind about Smart Store verification paths"
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "node .codex/hooks/pre-read-sensitive.cjs",
+        "event": "beforeReadFile",
+        "description": "Guard live auth, storageState, secrets, and captured failure artifacts"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "node .codex/hooks/pre-edit-config-guard.cjs",
+        "event": "afterFileEdit",
+        "description": "Warn on selector, session, Electron shell, config, and secret-risk edits"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .codex/hooks/stop-smart-store-review.cjs",
+        "event": "stop",
+        "description": "Summarize Smart Store automation, Electron, selector, and release risks"
+      }
+    ]
+  }
+}

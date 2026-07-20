@@ -1,0 +1,36 @@
+{
+  "responseOrder": [
+    "goal",
+    "operator-workflow",
+    "scope",
+    "risk",
+    "owning-layer",
+    "verification"
+  ],
+  "sensitivePaths": [
+    ".auth/**",
+    "secrets/**",
+    ".env",
+    ".env.*",
+    "output/html/**",
+    "storage-state*.json",
+    "**/storage-state*.json",
+    "**/chrome-profile/**"
+  ],
+  "owningLayers": {
+    "domain": "packages/core",
+    "application": "packages/application",
+    "infrastructure": "packages/infrastructure-playwright",
+    "sharedContracts": "packages/shared",
+    "desktopShell": "apps/desktop-electron",
+    "chromeExtension": "apps/chrome-extension",
+    "legacyReference": "src"
+  },
+  "preferredVerification": [
+    "npm run typecheck",
+    "npm run extension:build",
+    "npm run desktop:build",
+    "npm run desktop:dist when installer/runtime packaging changed",
+    "manual smoke with Smart Store seller-center tab when selector/session behavior changed"
+  ]
+}

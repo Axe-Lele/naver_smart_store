@@ -112,11 +112,10 @@ function isSensitivePath(filePath) {
 
 function isProtectedConfigPath(filePath) {
   return matchAny(filePath, [
-    /(^|\/)\.codex\/config\.toml$/i,
-    /(^|\/)\.codex\/hooks\.json$/i,
-    /(^|\/)\.claude\/commands\/.+\.md$/i,
-    /(^|\/)\.claude\/skills\/.+\/SKILL\.md$/i,
-    /(^|\/)\.agents\/skills\/.+\/SKILL\.md$/i,
+    /(^|\/)\.codex\//i,
+    /(^|\/)\.claude\//i,
+    /(^|\/)\.cursor\//i,
+    /(^|\/)\.agents\/skills\//i,
     /(^|\/)AGENTS\.md$/i,
     /(^|\/)CLAUDE\.md$/i,
     /(^|\/)agent\.yaml$/i,

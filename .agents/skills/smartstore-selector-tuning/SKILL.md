@@ -24,5 +24,4 @@ Adjust selectors with the smallest possible blast radius.
 # Verification
 
 - `npm run typecheck`
-- `npm run test`
 - Document what DOM assumption changed and what fallback selector or URL pattern now covers it.

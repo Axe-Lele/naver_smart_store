@@ -22,6 +22,9 @@ const CLIENT_STALE_MS = 45_000;
 const CLAIM_STALE_MS = 30_000;
 const DEFAULT_COMMAND_STALE_MS = 90_000;
 const STOP_COMMAND_STALE_MS = 3_000;
+// 클레임한 클라이언트가 하트비트를 유지하는 동안에는 명령을 시간 초과로 실패시키지
+// 않지만(대량 상품 수집은 수 분씩 걸린다), 무한정 매달리지 않도록 이 절대 상한은 둔다.
+const CLAIMED_COMMAND_MAX_AGE_MS = 30 * 60_000;
 const MAX_COMMAND_POLL_WAIT_MS = 30_000;
 
 type HybridHeartbeatPayload = {
@@ -68,6 +71,14 @@ export class HybridBridgeServer {
   private server?: Server;
 
   private startPromise?: Promise<void>;
+
+  // 이 데스크톱 세션에서 start/resume-batch 명령을 보낸 적이 있는지.
+  // 없는데 실행 중(executing) 하트비트가 오면, 앱을 껐다 켜기 전 세션의 배치가
+  // 작업 브라우저에서 계속 돌고 있다는 뜻이므로 자동으로 중단을 요청한다.
+  private batchCommandSentThisSession = false;
+
+  // 클라이언트별 마지막 자동 중단 요청 시각. 실패했을 때만 일정 간격으로 재시도한다.
+  private readonly autoStopAttemptAtByClientId = new Map<string, number>();
 
   private readonly clients = new Map<string, ClientRecord>();
 
@@ -186,6 +197,12 @@ export class HybridBridgeServer {
   ): HybridBridgeCommandState {
     this.pruneStaleState();
 
+    // 이 데스크톱 세션에서 배치를 시작/재개한 적이 있는지 기록한다.
+    // 앱을 껐다 켠 직후 이전 세션의 배치가 돌고 있으면 자동 중단하는 판단 기준.
+    if (type === 'start-batch' || type === 'resume-batch') {
+      this.batchCommandSentThisSession = true;
+    }
+
     const activeClientId = this.getTargetClientIdForCommand(type);
     const queuedAt = new Date().toISOString();
     const command: CommandRecord = {
@@ -274,6 +291,7 @@ export class HybridBridgeServer {
       receivedAt: now,
     });
     this.pruneStaleState();
+    this.stopForeignRunningBatch(payload, now);
 
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(
@@ -282,6 +300,42 @@ export class HybridBridgeServer {
         activeClientId: this.getActiveClientId(),
       }),
     );
+  }
+
+  // 앱을 껐다 켠 뒤, 이전 세션이 시작해 둔 배치가 작업 브라우저에서 계속 돌고 있으면
+  // 자동으로 중단을 요청한다. 이 데스크톱 세션에서 배치를 시작/재개한 적이 있으면
+  // 정상 실행 중이므로 건드리지 않는다.
+  private stopForeignRunningBatch(payload: HybridHeartbeatPayload, now: number): void {
+    if (this.batchCommandSentThisSession) {
+      return;
+    }
+
+    const phase =
+      typeof payload.progress === 'object' && payload.progress !== null
+        ? (payload.progress as { phase?: unknown }).phase
+        : undefined;
+    if (phase !== 'executing') {
+      return;
+    }
+
+    // 중단이 처리될 시간을 준 뒤에도 여전히 executing 이면 재시도한다.
+    const lastAttemptAt = this.autoStopAttemptAtByClientId.get(payload.clientId) ?? 0;
+    if (now - lastAttemptAt < 30_000) {
+      return;
+    }
+    this.autoStopAttemptAtByClientId.set(payload.clientId, now);
+
+    const queuedAt = new Date(now).toISOString();
+    const command: CommandRecord = {
+      commandId: randomUUID(),
+      type: 'stop-batch',
+      status: 'QUEUED',
+      queuedAt,
+      targetClientId: payload.clientId,
+      message: '앱이 다시 시작되어 이전 세션의 예약구매 작업을 자동으로 중단합니다.',
+    };
+    this.commands.unshift(command);
+    this.flushPendingPolls();
   }
 
   private handleCommandPoll(
@@ -473,7 +527,20 @@ export class HybridBridgeServer {
         continue;
       }
 
-      if (now - Date.parse(command.queuedAt) > getCommandStaleMs(command.type)) {
+      // 시간 초과 판정:
+      // - stop-batch 는 즉각 반응해야 하는 명령이라 예외 없이 3초 기준으로 실패시킨다.
+      // - 그 외 명령은, 클레임한 클라이언트가 여전히 하트비트를 보내는 중이면 대량
+      //   수집/변경처럼 오래 걸리는 작업일 수 있으므로 기본 시간 초과(90초)를 적용하지
+      //   않는다. 클라이언트가 실제로 죽으면 아래 연결 끊김 검사가 잡아낸다.
+      const queuedAgeMs = now - Date.parse(command.queuedAt);
+      const claimedByConnectedClient =
+        command.claimedByClientId !== undefined &&
+        connectedClientIds.has(command.claimedByClientId);
+      const allowLongRun = command.type !== 'stop-batch' && claimedByConnectedClient;
+      if (
+        queuedAgeMs > CLAIMED_COMMAND_MAX_AGE_MS ||
+        (queuedAgeMs > getCommandStaleMs(command.type) && !allowLongRun)
+      ) {
         command.status = 'FAILED';
         command.respondedAt = new Date(now).toISOString();
         command.claimedByClientId = undefined;
@@ -482,10 +549,15 @@ export class HybridBridgeServer {
         continue;
       }
 
+      // 클레임 해제는 클라이언트 연결이 끊긴 경우에만 한다. (예전에는 30초 무조건
+      // 해제였는데, 그러면 장시간 명령을 실행 중인 클레임이 풀려 위의 시간 초과
+      // 예외 판정이 무력화된다. 연결이 끊긴 클라이언트의 명령은 어차피 바로 아래
+      // 검사에서 실패 처리되므로, 이 해제는 사실상 방어적 정리다.)
       if (
         command.claimedByClientId &&
         command.claimedAt &&
-        now - command.claimedAt > CLAIM_STALE_MS
+        now - command.claimedAt > CLAIM_STALE_MS &&
+        !connectedClientIds.has(command.claimedByClientId)
       ) {
         command.claimedByClientId = undefined;
         command.claimedAt = undefined;

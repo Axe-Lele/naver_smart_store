@@ -1,0 +1,67 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 에메랄드 브랜드 그라디언트 (150deg 대각) -->
+    <linearGradient id="bg" x1="18%" y1="0%" x2="82%" y2="100%">
+      <stop offset="0%" stop-color="#2BD46B"/>
+      <stop offset="52%" stop-color="#17A34A"/>
+      <stop offset="100%" stop-color="#0F7A37"/>
+    </linearGradient>
+    <!-- 상단 광택 -->
+    <linearGradient id="gloss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="256" height="256" rx="57.3" ry="57.3"/>
+    </clipPath>
+    <filter id="wShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#07340f" flood-opacity="0.38"/>
+    </filter>
+    <filter id="sparkleGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#ffffff" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect width="256" height="256" fill="url(#bg)"/>
+    <!-- 상단 광택: 위쪽 절반을 은은하게 -->
+    <path d="M0 0 H256 V96 Q128 132 0 96 Z" fill="url(#gloss)"/>
+  </g>
+
+  <!-- 내부 하이라이트 라인 -->
+  <rect x="3" y="3" width="250" height="250" rx="54.6" ry="54.6" fill="none"
+        stroke="#ffffff" stroke-opacity="0.28" stroke-width="2.5"/>
+
+  <!-- 볼드 W 마크 (기하 패스 — 폰트 비의존) -->
+  <g filter="url(#wShadow)">
+    <path fill="#ffffff" d="
+      M 54 84
+      L 82 84
+      L 101 156
+      L 119 92
+      L 137 92
+      L 155 156
+      L 174 84
+      L 202 84
+      L 172 180
+      L 144 180
+      L 128 124
+      L 112 180
+      L 84 180
+      Z"/>
+  </g>
+
+  <!-- 다이아몬드 스파클 (wish) : 우상단 -->
+  <g filter="url(#sparkleGlow)">
+    <path fill="#ffffff" d="M 199 40
+      Q 203.6 58.4 222 63
+      Q 203.6 67.6 199 86
+      Q 194.4 67.6 176 63
+      Q 194.4 58.4 199 40 Z"/>
+  </g>
+  <path fill="#ffffff" fill-opacity="0.92" d="M 226 88
+    Q 228.2 96.8 237 99
+    Q 228.2 101.2 226 110
+    Q 223.8 101.2 215 99
+    Q 223.8 96.8 226 88 Z"/>
+</svg>

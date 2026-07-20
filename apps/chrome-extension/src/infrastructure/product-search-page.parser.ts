@@ -150,6 +150,11 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
 
   public async collectBundleDeliveryTargets(options: {
     pagination?: "current-page" | "all-pages";
+    /** all-pages 수집에서 페이지 하나를 읽을 때마다 호출된다. 진행 상황 표시용. */
+    onPageCollected?: (progress: {
+      pageIndex: number;
+      collectedCount: number;
+    }) => void | Promise<void>;
   } = {}): Promise<{
     products: Product[];
     verificationStatus: "verified" | "verification_required";
@@ -180,7 +185,7 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
 
     const collection =
       options.pagination === "all-pages"
-        ? await this.collectAllResultPages()
+        ? await this.collectAllResultPages(options.onPageCollected)
         : await this.collectCurrentResultPage(1);
     const uniqueProducts = dedupeProducts(collection.products);
     const verificationStatus =
@@ -352,7 +357,12 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
     };
   }
 
-  private async collectAllResultPages(): Promise<PageCollectionResult> {
+  private async collectAllResultPages(
+    onPageCollected?: (progress: {
+      pageIndex: number;
+      collectedCount: number;
+    }) => void | Promise<void>,
+  ): Promise<PageCollectionResult> {
     const products: Product[] = [];
     const skippedNotes: string[] = [];
     const paginationNotes: string[] = [];
@@ -371,6 +381,14 @@ export class ProductSearchPageParser implements ProductSearchPageParserPort {
       pageCount = pageIndex;
       products.push(...currentPage.products);
       skippedNotes.push(...currentPage.skippedNotes);
+
+      // 페이지 하나를 읽을 때마다 누적 건수를 알린다. 진행 표시가 수집을 막지 않도록
+      // 콜백 실패는 무시한다.
+      try {
+        await onPageCollected?.({ pageIndex, collectedCount: products.length });
+      } catch {
+        // 진행 표시 실패는 수집 자체에 영향을 주지 않는다.
+      }
 
       if (pageIndex === MAX_COLLECTION_RESULT_PAGES) {
         verificationStatus = "verification_required";

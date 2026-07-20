@@ -1,0 +1,14 @@
+{
+  "project": "smart-store",
+  "domain": "desktop-operator-automation",
+  "product": "Wishfigure Seller Desk",
+  "runtimes": [
+    "electron",
+    "react",
+    "typescript",
+    "playwright",
+    "chrome-extension"
+  ],
+  "default_language": "ko",
+  "ai_harness_baseline": "everything-claude-code style harness adapted for the Smart Store Desktop Operator"
+}

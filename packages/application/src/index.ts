@@ -1,5 +1,7 @@
 // File: packages/application/src/index.ts
+export * from './ports/amazon-product-lookup.port.js';
 export * from './ports/batch-job-store.port.js';
+export * from './ports/product-name-translator.port.js';
 export * from './ports/run-event.port.js';
 export * from './ports/session-gateway.port.js';
 export * from './ports/settings-store.port.js';
@@ -10,7 +12,9 @@ export * from './settings/app-settings.js';
 export * from './use-cases/build-change-plan.use-case.js';
 export * from './use-cases/execute-batch-change.use-case.js';
 export * from './use-cases/export-run-report.use-case.js';
+export * from './use-cases/generate-product-name-translations.use-case.js';
 export * from './use-cases/load-products.use-case.js';
+export * from './use-cases/lookup-amazon-products.use-case.js';
 export * from './use-cases/prepare-login-session.use-case.js';
 export * from './use-cases/resume-batch-change.use-case.js';
 export * from './use-cases/retry-failed-items.use-case.js';

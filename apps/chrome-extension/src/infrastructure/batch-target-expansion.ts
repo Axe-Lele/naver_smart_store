@@ -10,7 +10,7 @@ export const MAX_PAGINATION_ADVANCE_ATTEMPTS = 100;
 export const ALL_PAGES_COMPLETED_MESSAGE =
   "모든 페이지를 확인했고 더 이상 변경할 상품이 없습니다. 다 바꿨습니다.";
 
-const PAGINATION_STOP_PRODUCT_ID = "__pagination__";
+export const PAGINATION_STOP_PRODUCT_ID = "__pagination__";
 
 export function buildKnownProductIds(checkpoint: BatchExecutionCheckpoint): Set<string> {
   return new Set([

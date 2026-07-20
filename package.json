@@ -1,6 +1,6 @@
 {
   "name": "smart-store",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Electron desktop operator for setting Smart Store bundle-delivery scoped products as preorder products through the seller center UI.",
   "main": "dist/apps/desktop-electron/main/main.cjs",
   "type": "module",
@@ -51,14 +51,15 @@
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
     "eslint": "^8.57.1",
+    "jsdom": "^26.1.0",
+    "prettier": "^3.6.2",
+    "rcedit": "^5.0.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "prettier": "^3.6.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vite": "^7.3.2",
-    "vitest": "^3.2.4",
-    "jsdom": "^26.1.0"
+    "vitest": "^3.2.4"
   },
   "build": {
     "appId": "com.smartstore.desktopoperator",
@@ -109,7 +110,6 @@
     ],
     "win": {
       "icon": "apps/desktop-electron/resources/wishfigure-icon.ico",
-      "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false,
       "target": [
         {
@@ -119,7 +119,8 @@
           ]
         }
       ],
-      "artifactName": "WishfigureSellerDesk-Setup-${version}.${ext}"
+      "artifactName": "WishfigureSellerDesk-Setup-${version}.${ext}",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
@@ -127,6 +128,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Wishfigure Seller Desk"
-    }
+    },
+    "afterPack": "scripts/embed-app-icon.cjs"
   }
 }

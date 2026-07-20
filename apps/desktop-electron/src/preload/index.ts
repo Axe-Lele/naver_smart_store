@@ -55,6 +55,15 @@ const desktopApi: DesktopApi = {
     sendCommand: async (input) => invoke({ command: 'hybrid:sendCommand', payload: input }),
     openChromeExtensions: async () => invoke({ command: 'hybrid:openChromeExtensions' }),
     openSellerCenter: async () => invoke({ command: 'hybrid:openSellerCenter' }),
+    openCafe24Admin: async () => invoke({ command: 'hybrid:openCafe24Admin' }),
+  },
+  amazon: {
+    lookupProducts: async (input) =>
+      invoke({ command: 'amazon:lookupProducts', payload: input }),
+  },
+  productNames: {
+    translate: async (input) =>
+      invoke({ command: 'productNames:translate', payload: input }),
   },
   system: {
     openPath: async (input) => invoke({ command: 'system:openPath', payload: input }),

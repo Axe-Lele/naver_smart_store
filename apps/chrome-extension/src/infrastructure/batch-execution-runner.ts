@@ -19,6 +19,7 @@ import { ProductEditPageDriver } from "./product-edit-page.driver.js";
 import { SellerCenterPageGateway } from "./seller-center-page.gateway.js";
 import {
   ALL_PAGES_COMPLETED_MESSAGE,
+  PAGINATION_STOP_PRODUCT_ID,
   MAX_PAGINATION_ADVANCE_ATTEMPTS,
   appendPaginationTargets,
   buildKnownProductIds,
@@ -26,6 +27,12 @@ import {
   filterNewProducts,
   stopPaginationCheckpoint,
 } from "./batch-target-expansion.js";
+import { suppressPageLeaveConfirmQuietly } from "./page-leave-confirm-suppressor.js";
+
+// 같은 브라우저 탭 세션 안에서 배치가 실제로 돌고 있음을 나타내는 마커 키.
+// sessionStorage 는 탭/브라우저를 닫으면 비워지므로, 배치 진행 중의 페이지 이동
+// (마커 있음)과 브라우저를 껐다 켠 경우(마커 없음)를 구분하는 기준이 된다.
+const BATCH_SESSION_MARKER_KEY = "wishfigure.batch-session-active";
 
 const EDIT_NAVIGATION_TIMEOUT_MS = 3_500;
 const EDIT_NAVIGATION_POLL_MS = 100;
@@ -61,6 +68,8 @@ export class BatchExecutionRunner {
     options: BatchExecutionOptions = {},
   ): Promise<BatchExecutionCheckpoint> {
     this.clearScheduledNavigation();
+    // 운영자가 명시적으로 시작한 배치임을 이 탭 세션에 기록한다.
+    this.markBatchSessionActive();
 
     // 시작 시점에는 반드시 현재 상품목록 화면에서 묶음배송 조건이 검증된 상품만 수집합니다.
     // 여기서 검증에 실패하면 전체 상품을 잘못 건드릴 수 있으므로 실행 자체를 막습니다.
@@ -68,7 +77,9 @@ export class BatchExecutionRunner {
       pagination: "current-page",
     });
     if (parsed.verificationStatus !== "verified") {
-      throw new Error(parsed.note);
+      throw new Error(
+        `[시작 실패: 상품목록 검증] 실행을 시작하기 전에 현재 상품목록 화면을 검증하지 못했습니다. 검증 결과: ${parsed.note}`,
+      );
     }
 
     const selectedIds = new Set(
@@ -176,6 +187,8 @@ export class BatchExecutionRunner {
     checkpoint.updatedAt = new Date().toISOString();
 
     this.clearScheduledNavigation();
+    // 운영자가 명시적으로 이어하기를 실행한 것이므로 이 탭 세션을 활성으로 기록한다.
+    this.markBatchSessionActive();
     await this.batchStore.save(checkpoint);
     await this.progressStore.save(
       toProgressSnapshot(checkpoint, "executing", buildNavigationMessage(checkpoint)),
@@ -184,7 +197,10 @@ export class BatchExecutionRunner {
     return checkpoint;
   }
 
-  public async continueIfNeeded(policy: RunPolicy): Promise<BatchExecutionCheckpoint | null> {
+  public async continueIfNeeded(
+    policy: RunPolicy,
+    options: { maxResumeAgeMs?: number; requireActiveSession?: boolean } = {},
+  ): Promise<BatchExecutionCheckpoint | null> {
     if (this.isRunning) {
       return null;
     }
@@ -198,7 +214,32 @@ export class BatchExecutionRunner {
       return this.persistStoppedCheckpoint(checkpoint);
     }
 
+    // 브라우저(탭)를 껐다 켠 경우에는 이전 작업을 자동으로 이어가지 않는다.
+    // 배치 진행 중의 페이지 이동은 같은 탭 세션이라 마커가 남아 있고,
+    // 새로 연 브라우저에는 마커가 없다.
+    if (options.requireActiveSession && !this.hasActiveBatchSession()) {
+      return this.stopWithoutAutoResume(
+        checkpoint,
+        "브라우저를 새로 연 상태라 이전 예약구매 작업을 자동으로 이어가지 않았습니다. 이어서 하려면 실행 버튼으로 다시 시작해 주세요.",
+      );
+    }
+
+    // 페이지 로드 시점의 자동 이어하기(autoResumeBatch)에는 신선도 제한도 둔다.
+    // 배치가 실제로 돌고 있으면 체크포인트가 몇 초 간격으로 갱신되므로, 오래된
+    // running 체크포인트는 비정상 중단(탭 강제 종료, 다이얼로그 멈춤 등)의 잔재다.
+    if (options.maxResumeAgeMs !== undefined) {
+      const ageMs = Date.now() - Date.parse(checkpoint.updatedAt);
+      if (!Number.isFinite(ageMs) || ageMs > options.maxResumeAgeMs) {
+        return this.stopWithoutAutoResume(
+          checkpoint,
+          `이전 예약구매 작업이 약 ${Math.max(1, Math.round(ageMs / 60_000))}분 전 상태로 남아 있어 자동으로 이어가지 않았습니다. 이어서 하려면 실행 버튼으로 다시 시작해 주세요.`,
+        );
+      }
+    }
+
     this.isRunning = true;
+    // 정상적으로 이어가는 경우 세션 마커를 갱신해 다음 페이지 이동에서도 유지되게 한다.
+    this.markBatchSessionActive();
     try {
       // Smart Store 화면은 Angular/AG Grid 렌더링이 늦을 수 있어 DOM 준비를 먼저 기다립니다.
       await this.waitStrategy.waitForDocumentReady(8_000);
@@ -289,16 +330,20 @@ export class BatchExecutionRunner {
         return stoppedAfterApply;
       }
 
+      let consecutiveStopMessage: string | undefined;
       if (checkpoint.consecutiveFailureCount >= checkpoint.stopOnConsecutiveFailures) {
         // 같은 유형의 실패가 계속 반복되면 셀렉터 문제나 로그인/권한 문제일 가능성이 높습니다.
         // 이때는 계속 다음 상품으로 넘어가지 않고 운영자가 확인할 수 있게 배치를 멈춥니다.
         checkpoint.status = "stopped";
         checkpoint.stopRequested = true;
+        consecutiveStopMessage =
+          `[중단: 연속 실패 한도(적용 단계)] ${checkpoint.consecutiveFailureCount}건 연속으로 실패해 작업을 멈췄습니다. ` +
+          `마지막 실패 상품: ${currentTarget.productId} / 사유: ${result.message} ${this.describeCurrentPage()}`;
         checkpoint.results = mergeResults(checkpoint.results, [
           {
             productId: currentTarget.productId,
             state: ProductProcessingState.STOPPED,
-            message: `${checkpoint.consecutiveFailureCount}건 연속으로 실패해 안전을 위해 작업을 멈췄습니다.`,
+            message: consecutiveStopMessage,
             retryable: false,
             planNotes: [],
             artifacts: [],
@@ -313,6 +358,7 @@ export class BatchExecutionRunner {
         toProgressSnapshot(
           checkpoint,
           checkpoint.status === "stopped" ? "stopped" : "executing",
+          consecutiveStopMessage,
         ),
       );
 
@@ -372,6 +418,12 @@ export class BatchExecutionRunner {
       ]),
     };
 
+    // 복구 경로의 중단 메시지에는 어떤 실패가 반복됐는지(마지막 사유)와 당시 화면을
+    // 같이 남긴다. "연속 실패" 문구만으로는 적용 단계 중단과 구분이 안 되기 때문.
+    const recoveryStopMessage =
+      `[중단: 연속 실패 한도(복구 단계)] ${recovered.consecutiveFailureCount}건 연속으로 실패해 작업을 멈췄습니다. ` +
+      `마지막 실패 상품: ${target.productId} / 사유: ${result.message} ${this.describeCurrentPage()}`;
+
     if (recovered.consecutiveFailureCount >= recovered.stopOnConsecutiveFailures) {
       // 복구 가능한 실패라도 지정 횟수를 넘으면 자동화가 같은 화면에서 헤매고 있다는 뜻입니다.
       // refreshTargetsOnList를 끄고 stopped로 저장해 다음 resume이 다시 루프를 만들지 않게 합니다.
@@ -382,7 +434,7 @@ export class BatchExecutionRunner {
         {
           productId: target.productId,
           state: ProductProcessingState.STOPPED,
-          message: `${recovered.consecutiveFailureCount}건 연속으로 실패해 안전을 위해 작업을 멈췄습니다.`,
+          message: recoveryStopMessage,
           retryable: false,
           planNotes: [],
           artifacts: [],
@@ -396,8 +448,8 @@ export class BatchExecutionRunner {
         recovered,
         recovered.status === "stopped" ? "stopped" : "executing",
         recovered.status === "stopped"
-          ? `${recovered.consecutiveFailureCount}건 연속으로 실패해 안전을 위해 작업을 멈췄습니다.`
-          : `상품 ${target.productId} 처리에 실패했습니다. 상품목록에서 묶음배송 대상을 다시 수집합니다.`,
+          ? recoveryStopMessage
+          : `상품 ${target.productId} 처리에 실패했습니다(사유: ${result.message}). 상품목록에서 묶음배송 대상을 다시 수집합니다.`,
       ),
     );
 
@@ -415,6 +467,9 @@ export class BatchExecutionRunner {
     if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
       // 저장 후 확인 또는 상품관리 복귀가 실패하면 탭은 여전히 수정 페이지에 남아 있을 수 있습니다.
       // 다음 상품을 처리하기 전에 시작 당시 저장해 둔 상품목록 URL로 다시 들어가 안전한 기준점을 회복합니다.
+      // 이 복구 이동은 저장 없이 수정 화면을 떠나는 경우라, SPA 이탈 confirm("상세설명
+      // 내용이 유실됩니다")이 떠서 탭 전체가 멈출 수 있습니다. 이동 전에 먼저 억제합니다.
+      await suppressPageLeaveConfirmQuietly();
       this.windowRef.location.assign(checkpoint.searchPageUrl);
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
@@ -446,7 +501,7 @@ export class BatchExecutionRunner {
     if (parsed.verificationStatus !== "verified") {
       return this.stopAtPaginationFailure(
         checkpoint,
-        `실패 후 상품목록으로 돌아왔지만 묶음배송 대상을 다시 확인하지 못해 작업을 멈췄습니다. ${parsed.note}`,
+        `[중단: 실패 복구 중 목록 재확인 실패] 실패 후 상품목록으로 돌아왔지만 묶음배송 대상을 다시 확인하지 못해 작업을 멈췄습니다. 검증 결과: ${parsed.note} ${this.describeCurrentPage()}`,
       );
     }
 
@@ -502,6 +557,8 @@ export class BatchExecutionRunner {
   ): Promise<BatchExecutionCheckpoint> {
     if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
       // 현재 페이지의 대상이 끝났는데 수정 화면에 남아 있다면, 다음 페이지 버튼을 누르기 전에 목록으로 돌아갑니다.
+      // 저장하지 않은 수정 화면이면 SPA 이탈 confirm 이 탭을 멈출 수 있어 먼저 억제합니다.
+      await suppressPageLeaveConfirmQuietly();
       this.windowRef.location.assign(checkpoint.searchPageUrl);
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
@@ -536,7 +593,7 @@ export class BatchExecutionRunner {
       if (parsed.verificationStatus !== "verified") {
         return this.stopAtPaginationFailure(
           checkpoint,
-          `다음 페이지로 이동했지만 상품목록을 다시 확인하지 못해 작업을 멈췄습니다. ${parsed.note}`,
+          `[중단: 다음 페이지 확인 실패] 다음 페이지(${attempt + 1}번째 넘김)로 이동했지만 상품목록을 다시 확인하지 못해 작업을 멈췄습니다. 검증 결과: ${parsed.note} ${this.describeCurrentPage()}`,
         );
       }
 
@@ -578,7 +635,7 @@ export class BatchExecutionRunner {
 
     return this.stopAtPaginationFailure(
       checkpoint,
-      "pagination을 너무 많이 넘겨 안전을 위해 작업을 멈췄습니다.",
+      `[중단: 페이지 넘김 한도] 새로 변경할 상품 없이 다음 페이지를 ${MAX_PAGINATION_ADVANCE_ATTEMPTS}번 연속 넘겨 안전을 위해 작업을 멈췄습니다. 선택한 상품이 검색 결과에 더 이상 없거나, 이미 모두 처리된 상태일 수 있습니다. ${this.describeCurrentPage()}`,
     );
   }
 
@@ -592,7 +649,7 @@ export class BatchExecutionRunner {
 
     await this.batchStore.save(completed);
     await this.progressStore.save(
-      toProgressSnapshot(completed, "idle", ALL_PAGES_COMPLETED_MESSAGE),
+      toProgressSnapshot(completed, "idle", buildCompletionMessage(completed)),
     );
     return completed;
   }
@@ -646,6 +703,8 @@ export class BatchExecutionRunner {
 
     if (!isProductListUrl(this.gateway.getPageUrl(), checkpoint.searchPageUrl)) {
       // 수정 페이지나 다른 라우트에 있다면 먼저 목록 URL로 복귀하고, 복귀 후 continueIfNeeded가 다시 이어갑니다.
+      // 저장하지 않은 수정 화면일 수 있어 SPA 이탈 confirm 을 먼저 억제합니다.
+      await suppressPageLeaveConfirmQuietly();
       this.windowRef.location.assign(checkpoint.searchPageUrl);
       this.resumeTimerId = this.windowRef.setTimeout(() => {
         this.resumeTimerId = undefined;
@@ -661,7 +720,7 @@ export class BatchExecutionRunner {
       await this.markCurrentTargetFailedAndContinue(
         checkpoint,
         target,
-        "상품 목록에서 수정 버튼을 찾지 못했습니다. 목록 화면과 검색 결과를 다시 확인해 주세요.",
+        `[실패: 수정 버튼 찾기] 상품 ${target.productId}의 수정 버튼을 상품 목록에서 찾지 못했습니다. 목록 화면과 검색 결과를 다시 확인해 주세요. ${this.describeCurrentPage()}`,
         policy,
       );
       return;
@@ -732,6 +791,52 @@ export class BatchExecutionRunner {
       await this.waitStrategy.throttle(nextCheckpoint.delayMs);
       this.scheduleNavigationToCurrentTarget(nextCheckpoint, policy);
     }
+  }
+
+  // 중단/실패 메시지 끝에 붙여, 실패한 순간 탭이 어떤 화면에 있었는지 바로 알 수 있게 한다.
+  // 장시간 배치 중 세션이 만료되면 로그인 화면으로 튕기는데, 그 경우를 URL로 구분해준다.
+  // 배치가 이 탭 세션에서 실제로 시작/진행 중임을 기록한다. 탭을 닫으면 사라진다.
+  private markBatchSessionActive(): void {
+    try {
+      this.windowRef.sessionStorage.setItem(
+        BATCH_SESSION_MARKER_KEY,
+        new Date().toISOString(),
+      );
+    } catch {
+      // sessionStorage 접근이 막힌 환경이면 마커 없이 동작한다(자동 이어하기 안 함).
+    }
+  }
+
+  private hasActiveBatchSession(): boolean {
+    try {
+      return this.windowRef.sessionStorage.getItem(BATCH_SESSION_MARKER_KEY) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  // 자동 이어하기를 하지 않기로 판단한 running 체크포인트를 중단 상태로 정리한다.
+  private async stopWithoutAutoResume(
+    checkpoint: BatchExecutionCheckpoint,
+    message: string,
+  ): Promise<BatchExecutionCheckpoint> {
+    const stopped: BatchExecutionCheckpoint = {
+      ...checkpoint,
+      status: "stopped",
+      stopRequested: true,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.batchStore.save(stopped);
+    await this.progressStore.save(toProgressSnapshot(stopped, "stopped", message));
+    return stopped;
+  }
+
+  private describeCurrentPage(): string {
+    const url = this.gateway.getPageUrl();
+    const looksLikeLoginPage = /login|logout|auth|nid\.naver|sso/i.test(url);
+    return looksLikeLoginPage
+      ? `(당시 화면: ${url} — 로그인 화면으로 보입니다. 세션이 만료되었을 가능성이 높습니다. 다시 로그인한 뒤 이어하기를 눌러 주세요.)`
+      : `(당시 화면: ${url})`;
   }
 
   private clearScheduledNavigation(): void {
@@ -855,6 +960,38 @@ function filterSelectedProducts(
 
   const selected = new Set(selectedProductIds.map((productId) => productId.trim()));
   return products.filter((product) => selected.has(product.id.toString()));
+}
+
+// 완료 요약 메시지. 실패한 상품이 있으면 "다 바꿨습니다"라고 말하지 않고,
+// 실패 건수와 상품번호를 그대로 보여준다. 실패 상품은 같은 조건으로 다시 실행하면
+// (성공한 상품은 체크포인트 덕에 건너뛰므로) 실패분만 재시도된다.
+function buildCompletionMessage(checkpoint: BatchExecutionCheckpoint): string {
+  const productResults = checkpoint.results.filter(
+    (result) => result.productId !== PAGINATION_STOP_PRODUCT_ID,
+  );
+  const succeededCount = productResults.filter(
+    (result) => result.state === ProductProcessingState.SUCCEEDED,
+  ).length;
+  const failedResults = productResults.filter(
+    (result) =>
+      result.state === ProductProcessingState.FAILED ||
+      result.state === ProductProcessingState.STOPPED,
+  );
+
+  if (failedResults.length === 0) {
+    return ALL_PAGES_COMPLETED_MESSAGE;
+  }
+
+  const failedIdsPreview = failedResults
+    .slice(0, 10)
+    .map((result) => result.productId)
+    .join(", ");
+  const overflowNote = failedResults.length > 10 ? ` 외 ${failedResults.length - 10}건` : "";
+  return (
+    `모든 페이지를 확인했지만 ${failedResults.length}건은 변경하지 못했습니다 (성공 ${succeededCount}건). ` +
+    `실패 상품번호: ${failedIdsPreview}${overflowNote}. ` +
+    `같은 조건으로 다시 실행하면 성공한 상품은 건너뛰고 실패한 상품만 재시도합니다.`
+  );
 }
 
 function toProgressSnapshot(

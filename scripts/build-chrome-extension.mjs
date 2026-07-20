@@ -21,6 +21,10 @@ const entryPoints = [
     out: path.join(outDir, "presentation", "content", "content-script.js"),
   },
   {
+    in: path.join(appDir, "src", "presentation", "content", "cafe24-admin-redirect.ts"),
+    out: path.join(outDir, "presentation", "content", "cafe24-admin-redirect.js"),
+  },
+  {
     in: path.join(appDir, "src", "presentation", "popup", "popup.ts"),
     out: path.join(outDir, "presentation", "popup", "popup.js"),
   },
@@ -48,6 +52,7 @@ await Promise.all(
 );
 await cp(path.join(appDir, "manifest.json"), path.join(outDir, "manifest.json"));
 await cp(path.join(appDir, "popup.html"), path.join(outDir, "popup.html"));
+await cp(path.join(appDir, "icons"), path.join(outDir, "icons"), { recursive: true });
 
 console.log(`Chrome extension build complete: ${outDir}`);
 

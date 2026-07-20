@@ -34,13 +34,20 @@ export class CollectTargetProductsUseCase {
     private readonly logger: LoggerPort,
   ) {}
 
-  public async execute(): Promise<{
+  public async execute(options?: {
+    /** 페이지 하나를 읽을 때마다 호출된다. 데스크톱/팝업의 진행 표시용. */
+    onPageCollected?: (progress: {
+      pageIndex: number;
+      collectedCount: number;
+    }) => void | Promise<void>;
+  }): Promise<{
     products: Product[];
     verificationRequired: boolean;
     note: string;
   }> {
     const parsed = await this.parser.collectBundleDeliveryTargets({
       pagination: "all-pages",
+      onPageCollected: options?.onPageCollected,
     });
 
     this.logger.info("Collected target candidates", {

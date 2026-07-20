@@ -24,5 +24,4 @@ Debug login/session problems without violating Smart Store login policy.
 # Verification
 
 - `npm run typecheck`
-- `npm run test`
 - If Electron or Playwright session code changed, add a brief manual smoke procedure for `로그인 준비 시작` -> session save -> `세션 검증`.

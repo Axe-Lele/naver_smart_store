@@ -128,6 +128,7 @@ type PageChoiceOptionValueFillPort = (input: {
   index: number;
 }) => Promise<boolean>;
 type PageOptionListApplyClickPort = () => Promise<boolean>;
+type PageSaveButtonClickPort = () => Promise<boolean>;
 
 interface RetriablePageActionInput {
   action?: () => Promise<boolean>;
@@ -171,6 +172,7 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
     private readonly pageChoiceOptionNameFill?: PageChoiceOptionNameFillPort,
     private readonly pageChoiceOptionValueFill?: PageChoiceOptionValueFillPort,
     private readonly pageOptionListApplyClick?: PageOptionListApplyClickPort,
+    private readonly pageSaveButtonClick?: PageSaveButtonClickPort,
   ) {
     this.explorer = new DomExplorer(this.documentRef);
     this.locator = new ElementLocator(this.selectorRegistry, this.explorer);
@@ -2150,7 +2152,15 @@ export class ProductEditPageDriver implements ProductEditPageDriverPort {
     }
 
     scrollElementIntoView(saveButton);
-    triggerUserClick(saveButton);
+    // 저장하기는 Angular progress-button(vm.submit)이라 합성 이벤트 클릭이 무시될 수
+    // 있다. 다른 컨트롤들처럼 페이지(MAIN world) 핸들러 클릭을 먼저 시도하고,
+    // 핸들러가 없거나 실패했을 때만 기존 합성 클릭으로 폴백한다.
+    const pageClicked = this.pageSaveButtonClick
+      ? await this.pageSaveButtonClick().catch(() => false)
+      : false;
+    if (!pageClicked) {
+      triggerUserClick(saveButton);
+    }
 
     const productManagement = await this.clickProductManagementAfterSave();
     if (!productManagement.ok) {

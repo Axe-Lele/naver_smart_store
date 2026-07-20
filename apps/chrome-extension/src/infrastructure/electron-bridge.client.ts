@@ -42,6 +42,10 @@ type BridgeCommandResultPayload = {
 
 const COMMAND_POLL_WAIT_MS = 25_000;
 const BRIDGE_RETRY_DELAY_MS = 2_000;
+// 명령 실행 중에도 이 간격으로 하트비트를 보낸다. 대량 상품 수집처럼 수 분 걸리는
+// 명령을 실행하는 동안 하트비트가 끊기면, 데스크톱이 클라이언트가 죽었다고
+// 오판(45초 무응답 기준)해서 진행 중인 명령을 실패 처리해버린다.
+const EXECUTION_HEARTBEAT_INTERVAL_MS = 10_000;
 
 export class ElectronBridgeClient {
   private readonly clientId = crypto.randomUUID();
@@ -54,6 +58,9 @@ export class ElectronBridgeClient {
 
   private lastBridgeUnavailableLogAt = 0;
 
+  // 작업용 브라우저 프로필로 확인되면 true 로 고정해 storage 재조회를 건너뛴다.
+  private confirmedWorkBrowser = false;
+
   public constructor(
     private readonly bridgeUrl: string,
     private readonly gateway: SellerCenterPageGatewayPort,
@@ -64,6 +71,9 @@ export class ElectronBridgeClient {
       payload?: HybridCommandPayload,
     ) => Promise<unknown>,
     private readonly windowRef: Window,
+    // 이 프로필이 데스크톱이 띄운 작업용 브라우저인지 확인한다. 개인 크롬에 설치된
+    // 같은 확장이 브리지에 붙어 명령을 가로채는 사고를 막는다. (기본값은 테스트 호환용)
+    private readonly isWorkBrowserProfile: () => Promise<boolean> = async () => true,
   ) {}
 
   public start(): void {
@@ -101,6 +111,17 @@ export class ElectronBridgeClient {
       return;
     }
 
+    // 작업용 브라우저 프로필이 아니면 브리지에 아예 연결하지 않는다.
+    // (플래그는 데스크톱이 마커 붙은 URL로 이 브라우저를 열 때 기록된다.)
+    if (!this.confirmedWorkBrowser) {
+      const isWorkBrowser = await this.isWorkBrowserProfile().catch(() => false);
+      if (!isWorkBrowser) {
+        this.scheduleNextTick(BRIDGE_RETRY_DELAY_MS);
+        return;
+      }
+      this.confirmedWorkBrowser = true;
+    }
+
     this.inFlight = true;
     let nextDelayMs = 0;
 
@@ -109,6 +130,12 @@ export class ElectronBridgeClient {
       const command = await this.pollCommand();
 
       if (command) {
+        // 실행 중 하트비트: 연결 유지 판정용이자, progress 스냅샷이 하트비트에 실려
+        // 데스크톱 화면에 진행 상황이 실시간 반영되는 통로이기도 하다.
+        const executionHeartbeatId = this.windowRef.setInterval(() => {
+          void this.sendHeartbeat().catch(() => undefined);
+        }, EXECUTION_HEARTBEAT_INTERVAL_MS);
+
         let response: unknown;
         try {
           response = await this.executeCommand(command.type, command.payload);
@@ -117,6 +144,8 @@ export class ElectronBridgeClient {
             ok: false,
             message: stringifyError(error),
           };
+        } finally {
+          this.windowRef.clearInterval(executionHeartbeatId);
         }
 
         await this.postResult({

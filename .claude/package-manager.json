@@ -1,0 +1,4 @@
+{
+  "default": "npm",
+  "reason": "This repository is a TypeScript monorepo-style Electron and Chrome extension project driven by package.json scripts."
+}

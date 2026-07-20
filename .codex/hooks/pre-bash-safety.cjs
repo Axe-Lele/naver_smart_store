@@ -47,7 +47,7 @@ function stagedWarnings(root, command) {
   }
 
   if (staged.some((file) => /^packages\/(core|application)\//.test(file))) {
-    warnings.push('Core or application changes are staged. Re-run `npm run typecheck` and `npm run test` before commit.');
+    warnings.push('Core or application changes are staged. Re-run `npm run typecheck` before commit.');
   }
 
   if (staged.some((file) => /^packages\/infrastructure-playwright\//.test(file))) {
@@ -62,7 +62,7 @@ function stagedWarnings(root, command) {
     warnings.push('Packaging/runtime changes are staged. Re-check `npm run desktop:dist` or explain why installer verification is not needed.');
   }
 
-  if (staged.some((file) => /^(AGENTS\.md|CLAUDE\.md|agent\.yaml|\.codex\/|\.claude\/|\.agents\/)/.test(file))) {
+  if (staged.some((file) => /^(AGENTS\.md|CLAUDE\.md|agent\.yaml|\.codex\/|\.claude\/|\.cursor\/|\.agents\/)/.test(file))) {
     warnings.push('Harness files are staged. Re-check cross-harness paths, hook commands, and workflow docs for consistency.');
   }
 

@@ -175,6 +175,11 @@ export interface ProductSearchPageParserPort {
   inspectCurrentPage(): Promise<ProductListPageDraft>;
   collectBundleDeliveryTargets(options?: {
     pagination?: "current-page" | "all-pages";
+    /** all-pages 수집에서 페이지 하나를 읽을 때마다 호출된다. 진행 상황 표시용. */
+    onPageCollected?: (progress: {
+      pageIndex: number;
+      collectedCount: number;
+    }) => void | Promise<void>;
   }): Promise<{
     products: Product[];
     verificationStatus: VerificationStatus;

@@ -3,10 +3,21 @@ import { z } from 'zod';
 
 import {
   appSettingsSchema,
+  generateProductNameTranslationsInputSchema,
+  lookupAmazonProductsInputSchema,
   preorderRequiredOptionSchema,
   type AppSettings,
+  type AmazonProductLookupResult,
+  type ProductNameTranslationBatchResult,
 } from '@smart-store/application';
 import type { RunEvent } from '@smart-store/application';
+
+export type {
+  AmazonProductLookupItem,
+  AmazonProductLookupResult,
+  ProductNameTranslationBatchResult,
+  ProductNameTranslationResultItem,
+} from '@smart-store/application';
 import {
   batchJobIdPrimitiveSchema,
   productIdPrimitiveSchema,
@@ -80,6 +91,14 @@ export const copyTextInputSchema = z.object({
   text: z.string(),
 });
 export type CopyTextInput = z.output<typeof copyTextInputSchema>;
+
+export const productNameTranslationsInputSchema = generateProductNameTranslationsInputSchema;
+export type ProductNameTranslationsInput = z.output<typeof productNameTranslationsInputSchema>;
+
+export const lookupAmazonProductsDesktopInputSchema = lookupAmazonProductsInputSchema;
+export type LookupAmazonProductsDesktopInput = z.output<
+  typeof lookupAmazonProductsDesktopInputSchema
+>;
 
 export const updateSettingsInputSchema = appSettingsSchema;
 export type UpdateSettingsInput = z.output<typeof updateSettingsInputSchema>;
@@ -193,6 +212,9 @@ export type DesktopInvokeRequest =
   | { command: 'hybrid:sendCommand'; payload: HybridSendCommandInput }
   | { command: 'hybrid:openChromeExtensions' }
   | { command: 'hybrid:openSellerCenter' }
+  | { command: 'hybrid:openCafe24Admin' }
+  | { command: 'amazon:lookupProducts'; payload: LookupAmazonProductsDesktopInput }
+  | { command: 'productNames:translate'; payload: ProductNameTranslationsInput }
   | { command: 'system:openPath'; payload: OpenPathInput }
   | { command: 'system:copyText'; payload: CopyTextInput };
 
@@ -216,6 +238,13 @@ export interface DesktopApi {
     sendCommand(input: HybridSendCommandInput): Promise<HybridBridgeCommandState>;
     openChromeExtensions(): Promise<void>;
     openSellerCenter(): Promise<void>;
+    openCafe24Admin(): Promise<void>;
+  };
+  amazon: {
+    lookupProducts(input: LookupAmazonProductsDesktopInput): Promise<AmazonProductLookupResult>;
+  };
+  productNames: {
+    translate(input: ProductNameTranslationsInput): Promise<ProductNameTranslationBatchResult>;
   };
   system: {
     openPath(input: OpenPathInput): Promise<void>;
@@ -264,6 +293,16 @@ export function parseOpenPathInput(input: unknown): OpenPathInput {
 
 export function parseCopyTextInput(input: unknown): CopyTextInput {
   return copyTextInputSchema.parse(input);
+}
+
+export function parseProductNameTranslationsInput(input: unknown): ProductNameTranslationsInput {
+  return productNameTranslationsInputSchema.parse(input);
+}
+
+export function parseLookupAmazonProductsDesktopInput(
+  input: unknown,
+): LookupAmazonProductsDesktopInput {
+  return lookupAmazonProductsDesktopInputSchema.parse(input);
 }
 
 export function parseUpdateSettingsInput(input: unknown): UpdateSettingsInput {

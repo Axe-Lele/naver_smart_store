@@ -7,7 +7,9 @@ import {
   DESKTOP_INVOKE_CHANNEL,
   parseCopyTextInput,
   parseHybridSendCommandInput,
+  parseLookupAmazonProductsDesktopInput,
   parseOpenPathInput,
+  parseProductNameTranslationsInput,
   parseUpdateSettingsInput,
 } from '@smart-store/shared';
 
@@ -18,6 +20,9 @@ type DesktopRuntime = {
   sendHybridCommand(input: unknown): Promise<unknown>;
   openChromeExtensions(): Promise<unknown>;
   openSellerCenter(): Promise<unknown>;
+  openCafe24Admin(): Promise<unknown>;
+  lookupAmazonProducts(input: unknown): Promise<unknown>;
+  translateProductNames(input: unknown): Promise<unknown>;
   openPath(targetPath: string): Promise<unknown>;
   copyText(text: string): Promise<unknown>;
 };
@@ -51,6 +56,20 @@ export function registerDesktopIpc(
             return ok(await runtime.openChromeExtensions());
           case 'hybrid:openSellerCenter':
             return ok(await runtime.openSellerCenter());
+          case 'hybrid:openCafe24Admin':
+            return ok(await runtime.openCafe24Admin());
+          case 'amazon:lookupProducts':
+            return ok(
+              await runtime.lookupAmazonProducts(
+                parseLookupAmazonProductsDesktopInput(request.payload),
+              ),
+            );
+          case 'productNames:translate':
+            return ok(
+              await runtime.translateProductNames(
+                parseProductNameTranslationsInput(request.payload),
+              ),
+            );
           case 'system:openPath':
             return ok(await runtime.openPath(parseOpenPathInput(request.payload).targetPath));
           case 'system:copyText':

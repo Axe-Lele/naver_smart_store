@@ -7,6 +7,8 @@ import type { RunEventPublisherPort, RunLogLevel } from '@smart-store/applicatio
 import {
   DEFAULT_SMARTSTORE_PRODUCTS_URL,
   DEFAULT_PREORDER_REQUIRED_OPTIONS,
+  GenerateProductNameTranslationsUseCase,
+  LookupAmazonProductsUseCase,
   type AppSettings,
 } from '@smart-store/application';
 import { BatchJobId, type LoginSessionSnapshot } from '@smart-store/core';
@@ -23,15 +25,19 @@ import type {
   HybridBridgeState,
   HybridSendCommandInput,
   ListRecentRunsInput,
+  LookupAmazonProductsDesktopInput,
   LoadProductsInput,
   RetryFailedItemsInput,
   RunDetail,
   StopBatchInput,
+  ProductNameTranslationsInput,
 } from '@smart-store/shared';
 import type { RunEvent } from '@smart-store/application';
 
+import { AmazonPaApiProductLookup } from './amazon-paapi-product-lookup.js';
 import { type ChromeLaunchOptions, openUrlInChrome } from './chrome-launcher.js';
 import { HybridBridgeServer } from './hybrid-bridge-server.js';
+import { OpenAiProductNameTranslator } from './openai-product-name-translator.js';
 
 const COMPACT_CHROME_WINDOW_SIZE = {
   width: 1000,
@@ -40,6 +46,8 @@ const COMPACT_CHROME_WINDOW_SIZE = {
 
 const COMPACT_CHROME_WINDOW_MARGIN = 24;
 const DEDICATED_CHROME_PROFILE_DIRECTORY = 'Default';
+
+const CAFE24_ADMIN_LOGIN_URL = 'https://tmg023.cafe24.com/mall/admin/admin_login.php';
 const PLAYWRIGHT_CHROMIUM_EXECUTABLE_SEGMENTS = [
   'chrome-win64',
   'chrome.exe',
@@ -92,6 +100,10 @@ export class DesktopAppRuntime {
 
   private readonly hybridBridgeServer: HybridBridgeServer;
 
+  private readonly productNameTranslations: GenerateProductNameTranslationsUseCase;
+
+  private readonly amazonProductLookup: LookupAmazonProductsUseCase;
+
   private currentJobId?: string;
 
   private lastKnownSession: LoginSessionSnapshot;
@@ -127,6 +139,22 @@ export class DesktopAppRuntime {
       chromeExtensionsUrl: 'chrome://extensions',
       sellerCenterUrl: DEFAULT_SMARTSTORE_PRODUCTS_URL,
     });
+    this.productNameTranslations = new GenerateProductNameTranslationsUseCase(
+      new OpenAiProductNameTranslator({
+        apiKey: process.env.OPENAI_API_KEY,
+        model: process.env.OPENAI_PRODUCT_NAME_MODEL ?? process.env.OPENAI_MODEL,
+      }),
+    );
+    this.amazonProductLookup = new LookupAmazonProductsUseCase(
+      new AmazonPaApiProductLookup({
+        accessKey: process.env.AMAZON_PA_API_ACCESS_KEY,
+        secretKey: process.env.AMAZON_PA_API_SECRET_KEY,
+        partnerTag: process.env.AMAZON_PA_API_PARTNER_TAG,
+        host: process.env.AMAZON_PA_API_HOST,
+        marketplace: process.env.AMAZON_PA_API_MARKETPLACE,
+        region: process.env.AMAZON_PA_API_REGION,
+      }),
+    );
     this.orchestrator = new PlaywrightBatchExecutionOrchestrator({
       settingsFilePath: path.join(configDir, 'settings.json'),
       defaultSettings: {
@@ -226,6 +254,22 @@ export class DesktopAppRuntime {
     const executablePath = this.requireWorkBrowserExecutablePath();
     await this.openChromeTarget(
       settings.productsUrl || DEFAULT_SMARTSTORE_PRODUCTS_URL,
+      '작업용 브라우저 실행 파일을 찾지 못했습니다. 설치 파일을 다시 설치해 주세요.',
+      this.createChromeLaunchOptions({
+        compactWorkWindow: true,
+        executablePath,
+        userDataDir: this.getDefaultWorkBrowserUserDataDir(),
+        profileDirectory: DEDICATED_CHROME_PROFILE_DIRECTORY,
+        extensionPath: this.getChromeExtensionPath(),
+        restartExistingUserDataDir: true,
+      }),
+    );
+  }
+
+  async openCafe24Admin(): Promise<void> {
+    const executablePath = this.requireWorkBrowserExecutablePath();
+    await this.openChromeTarget(
+      CAFE24_ADMIN_LOGIN_URL,
       '작업용 브라우저 실행 파일을 찾지 못했습니다. 설치 파일을 다시 설치해 주세요.',
       this.createChromeLaunchOptions({
         compactWorkWindow: true,
@@ -433,6 +477,34 @@ export class DesktopAppRuntime {
     });
   }
 
+  async translateProductNames(input: ProductNameTranslationsInput) {
+    const result = await this.productNameTranslations.execute(input);
+    await this.publishLog(
+      'info',
+      'Generated Korean product name candidates.',
+      undefined,
+      {
+        itemCount: result.items.length,
+        model: result.model ?? null,
+      },
+    );
+    return result;
+  }
+
+  async lookupAmazonProducts(input: LookupAmazonProductsDesktopInput) {
+    const result = await this.amazonProductLookup.execute(input);
+    await this.publishLog(
+      'info',
+      'Loaded Amazon product source data.',
+      undefined,
+      {
+        itemCount: result.items.length,
+        readyCount: result.items.filter((item) => item.status === 'READY').length,
+      },
+    );
+    return result;
+  }
+
   async openPath(targetPath: string): Promise<void> {
     const errorMessage = await shell.openPath(path.resolve(targetPath));
 
@@ -469,6 +541,10 @@ export class DesktopAppRuntime {
     fallbackMessage: string,
     options: ChromeLaunchOptions = {},
   ): Promise<void> {
+    // 판매자센터 URL에는 '작업용 브라우저' 짝짓기 마커를 붙인다. 확장이 이 마커를
+    // 보고 해당 프로필을 작업용으로 기록하며, 마커를 본 적 없는 개인 크롬의 확장은
+    // 하이브리드 브리지에 연결하지 않는다 (개인 크롬 탭에서 상품을 긁어오는 사고 방지).
+    target = appendWorkBrowserMarker(target);
     let chromePath: string | null;
     try {
       chromePath = await openUrlInChrome(target, options);
@@ -719,4 +795,18 @@ function formatChromeWindowPosition(
   value: ChromeLaunchOptions['windowPosition'],
 ): string | null {
   return value ? `${value.x},${value.y}` : null;
+}
+
+// 판매자센터 URL에 작업용 브라우저 짝짓기 마커를 붙인다. 다른 도메인은 그대로 둔다.
+function appendWorkBrowserMarker(target: string): string {
+  try {
+    const url = new URL(target);
+    if (!url.hostname.endsWith('sell.smartstore.naver.com')) {
+      return target;
+    }
+    url.searchParams.set('wfWorkBrowser', '1');
+    return url.toString();
+  } catch {
+    return target;
+  }
 }

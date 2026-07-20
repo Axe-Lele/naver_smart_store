@@ -25,6 +25,10 @@ import {
   WaitStrategy,
   toRunPolicy,
 } from "../../infrastructure/index.js";
+import {
+  isWorkBrowserProfile,
+  markWorkBrowserProfile,
+} from "../../infrastructure/work-browser-flag.store.js";
 import type { RequiredOption } from "../../domain/index.js";
 import type { CommandResponse, ContentCommand } from "../messages.js";
 
@@ -77,6 +81,7 @@ const driver = new ProductEditPageDriver(
   requestPageChoiceOptionNameFill,
   requestPageChoiceOptionValueFill,
   requestPageOptionListApplyClick,
+  requestPageSaveButtonClick,
 );
 const reportReader = new SelectorInspectionReporter(
   gateway,
@@ -109,6 +114,7 @@ const bridgeClient = new ElectronBridgeClient(
   logger,
   (type, payload) => executeBridgeCommand(type, payload),
   window,
+  isWorkBrowserProfile,
 );
 
 type BridgeCommandPayload = {
@@ -139,6 +145,13 @@ chrome.runtime.onMessage.addListener(
     return true;
   },
 );
+
+// 데스크톱이 띄운 작업용 브라우저 표식(wfWorkBrowser=1)을 확인하면 이 프로필을
+// 작업용으로 영구 기록한다. 개인 크롬에는 이 마커가 갈 일이 없으므로, 개인 크롬의
+// 판매자센터 탭이 하이브리드 브리지에 붙어 상품을 긁어오는 사고를 막는다.
+if (new URLSearchParams(window.location.search).get("wfWorkBrowser") === "1") {
+  void markWorkBrowserProfile();
+}
 
 bridgeClient.start();
 window.addEventListener("pagehide", () => bridgeClient.stop(), { once: true });
@@ -356,9 +369,26 @@ async function requestPageOptionListApplyClick(): Promise<boolean> {
   return Boolean(response?.ok);
 }
 
+async function requestPageSaveButtonClick(): Promise<boolean> {
+  const response = await chrome.runtime.sendMessage({
+    type: "content/click-page-save-button",
+  });
+
+  return Boolean(response?.ok);
+}
+
+// 페이지 로드 시 자동 이어하기가 허용되는 체크포인트 최대 나이.
+// 배치 실행 중에는 체크포인트가 몇 초 간격으로 갱신되므로 10분이면 충분히 여유 있다.
+// 이보다 오래된 running 체크포인트는 비정상 중단의 잔재로 보고 자동 재개하지 않는다.
+const AUTO_RESUME_MAX_AGE_MS = 10 * 60_000;
+
 async function autoResumeBatch(): Promise<void> {
   try {
-    await batchRunner.continueIfNeeded(toRunPolicy(defaultExtensionSettings, false));
+    await batchRunner.continueIfNeeded(toRunPolicy(defaultExtensionSettings, false), {
+      maxResumeAgeMs: AUTO_RESUME_MAX_AGE_MS,
+      // 브라우저(탭)를 껐다 켠 경우에는 이전 작업을 자동으로 이어가지 않는다.
+      requireActiveSession: true,
+    });
   } catch (error) {
     logger.error("Automatic batch resume failed", {
       error: error instanceof Error ? error.message : "Unknown error",
@@ -416,7 +446,34 @@ async function executeBridgeCommand(
       };
     }
     case "collect-targets": {
-      const collected = await collector.execute();
+      // 이전 수집/작업의 진행 스냅샷이 남아 있으면 새 수집 시작 직후 잘못된 건수가
+      // 보일 수 있어, 0건 상태로 초기화하고 바로 알린다.
+      await progressStore.save(await buildSnapshot(0, "상품 수집을 시작합니다."));
+      await flushBridgeQuietly();
+      const collected = await collector.execute({
+        // 페이지 하나를 읽을 때마다 progress 저장소에 누적 건수를 남긴다.
+        // 실행 중 하트비트가 이 스냅샷을 데스크톱에 실어 보내 "몇 건 읽었는지"가
+        // 불러오기 모달에 실시간으로 표시된다.
+        onPageCollected: async ({ pageIndex, collectedCount }) => {
+          const updatedAt = new Date().toISOString();
+          await progressStore.save({
+            phase: "collecting",
+            updatedAt,
+            targetCount: 0,
+            completedCount: collectedCount,
+            results: [],
+            logs: [
+              {
+                timestamp: updatedAt,
+                level: "info",
+                message: `${pageIndex}페이지까지 상품 ${collectedCount}건을 읽었습니다.`,
+              },
+            ],
+          });
+          // 10초 주기 하트비트를 기다리지 않고 바로 한 번 보내 실시간으로 반영한다.
+          await flushBridgeQuietly();
+        },
+      });
       const progress = await buildSnapshot(collected.products.length, collected.note);
       return {
         ok: !collected.verificationRequired,

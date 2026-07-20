@@ -48,6 +48,9 @@ function createRuntimeFactory(): () => Promise<{
   sendHybridCommand(input: unknown): Promise<unknown>;
   openChromeExtensions(): Promise<unknown>;
   openSellerCenter(): Promise<unknown>;
+  openCafe24Admin(): Promise<unknown>;
+  lookupAmazonProducts(input: unknown): Promise<unknown>;
+  translateProductNames(input: unknown): Promise<unknown>;
   openPath(targetPath: string): Promise<unknown>;
   copyText(text: string): Promise<unknown>;
 }> {
@@ -59,6 +62,9 @@ function createRuntimeFactory(): () => Promise<{
       sendHybridCommand(input: unknown): Promise<unknown>;
       openChromeExtensions(): Promise<unknown>;
       openSellerCenter(): Promise<unknown>;
+      openCafe24Admin(): Promise<unknown>;
+      lookupAmazonProducts(input: unknown): Promise<unknown>;
+      translateProductNames(input: unknown): Promise<unknown>;
       openPath(targetPath: string): Promise<unknown>;
       copyText(text: string): Promise<unknown>;
       }>

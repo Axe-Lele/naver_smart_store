@@ -1,0 +1,18 @@
+---
+description: Smart Store Desktop Operator strict rule
+globs:
+  - "packages/**/*"
+  - "apps/desktop-electron/**/*"
+  - "apps/chrome-extension/**/*"
+  - "scripts/**/*"
+alwaysApply: true
+---
+
+- Treat this repository as an Electron + React desktop operator for Smart Store seller-center UI automation.
+- Never assume this is a public web service, backend API, or generic ecommerce app.
+- Do not automate Naver ID/password entry, CAPTCHA, MFA, or unofficial Smart Store internal API calls.
+- Start from the operator workflow, then map responsibility through UI -> application -> infrastructure -> Smart Store UI.
+- Keep domain rules in `packages/core`, orchestration in `packages/application`, Playwright/selector/session work in infrastructure, and IPC/renderer concerns in `apps/desktop-electron`.
+- Treat `src/*` as legacy CLI PoC reference unless the active code path clearly still depends on it.
+- Selector changes should prefer selector profiles and fallback detection before hard-coding page logic.
+- Session files, `.auth`, `secrets`, real `.env`, storageState, screenshots, and HTML artifacts are sensitive.

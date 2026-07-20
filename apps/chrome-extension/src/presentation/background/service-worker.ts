@@ -4,14 +4,24 @@ import {
   ChromeProgressStore,
   defaultExtensionSettings,
 } from "../../infrastructure/index.js";
+import { getMangoOpenAiApiKey } from "../../infrastructure/mango-openai-api-key-store.js";
+import { fetchOriginReleaseDates } from "../../infrastructure/mango-amazon-release-date.js";
+import {
+  translateMangoOriginProductNamesBatch,
+  type MangoTranslationFewShotExample,
+} from "../../infrastructure/mango-openai-product-name-translator.js";
 import type {
   CommandResponse,
   ContentCommand,
+  MangoFetchOriginReleaseDatesCommand,
+  MangoTranslateProductNamesBatchCommand,
   PageChoiceOptionNameFillCommand,
   PageChoiceOptionValueFillCommand,
   PageChoiceSimpleTypeClickCommand,
   PageAfterSaleStatusOnClickCommand,
+  PageLeaveConfirmSuppressCommand,
   PageOptionListApplyClickCommand,
+  PageSaveButtonClickCommand,
   PageChoiceTypeOnClickCommand,
   PageDispatchCompletionCalendarClickCommand,
   PageDispatchCompletionLastEnabledDayClickCommand,
@@ -69,7 +79,11 @@ chrome.runtime.onMessage.addListener(
       | PageChoiceSimpleTypeClickCommand
       | PageChoiceOptionNameFillCommand
       | PageChoiceOptionValueFillCommand
-      | PageOptionListApplyClickCommand,
+      | PageOptionListApplyClickCommand
+      | PageSaveButtonClickCommand
+      | PageLeaveConfirmSuppressCommand
+      | MangoTranslateProductNamesBatchCommand
+      | MangoFetchOriginReleaseDatesCommand,
     sender,
     sendResponse: (response: CommandResponse) => void,
   ) => {
@@ -110,9 +124,36 @@ async function handleRuntimeCommand(
     | PageChoiceSimpleTypeClickCommand
     | PageChoiceOptionNameFillCommand
     | PageChoiceOptionValueFillCommand
-    | PageOptionListApplyClickCommand,
+    | PageOptionListApplyClickCommand
+    | PageSaveButtonClickCommand
+    | PageLeaveConfirmSuppressCommand
+    | MangoTranslateProductNamesBatchCommand
+    | MangoFetchOriginReleaseDatesCommand,
   sender: chrome.runtime.MessageSender,
 ): Promise<CommandResponse> {
+  if (message.type === "content/click-page-save-button") {
+    return clickPageSaveButton(sender.tab?.id);
+  }
+  if (message.type === "content/suppress-page-leave-confirm") {
+    return suppressPageLeaveConfirm(sender.tab?.id, message.durationMs ?? 5_000);
+  }
+  if (message.type === "mango/translate-product-names-batch") {
+    return translateMangoProductNamesBatch(
+      message.items,
+      message.model ?? "",
+      message.examples ?? [],
+    );
+  }
+
+  if (message.type === "mango/fetch-origin-release-dates") {
+    const results = await fetchOriginReleaseDates(message.items);
+    return {
+      ok: true,
+      message: `발매일 조회 ${results.length}건 완료`,
+      details: { results },
+    };
+  }
+
   if (message.type === "content/click-page-time-option") {
     return clickPageTimeOption(sender.tab?.id, message);
   }
@@ -198,6 +239,31 @@ async function handleRuntimeCommand(
   }
 
   return handlePopupCommand(message);
+}
+
+async function translateMangoProductNamesBatch(
+  items: Array<{ id: string; originName: string; fallbackManufacturer?: string | null }>,
+  model: string,
+  examples: MangoTranslationFewShotExample[],
+): Promise<CommandResponse> {
+  try {
+    const apiKey = await getMangoOpenAiApiKey();
+    const result = await translateMangoOriginProductNamesBatch(apiKey, items, model, examples);
+    return {
+      ok: true,
+      message: `상품 ${result.results.length}건 번역 결과를 받았습니다.`,
+      details: {
+        results: result.results,
+        usage: result.usage,
+        modelUsed: result.modelUsed,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "상품명 번역에 실패했습니다.",
+    };
+  }
 }
 
 async function handlePopupCommand(message: PopupCommand): Promise<CommandResponse> {
@@ -335,6 +401,80 @@ function injectContentScript(tabId: number): Promise<CommandResponse> {
       },
     );
   });
+}
+
+// 저장하지 않은 수정 페이지에서 목록으로 강제 이동하기 직전에 호출된다.
+// window.confirm 을 잠깐 자동 승인(true)으로 바꿔, SPA 이탈 확인 다이얼로그가
+// 탭 전체를 멈추는 것을 막는다. durationMs 뒤에는 원래 confirm 으로 복원된다.
+async function suppressPageLeaveConfirm(
+  tabId: number | undefined,
+  durationMs: number,
+): Promise<CommandResponse> {
+  if (!tabId) {
+    return {
+      ok: false,
+      message: "Leave-confirm suppression target tab was not available.",
+    };
+  }
+
+  return new Promise<CommandResponse>((resolve) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: "MAIN",
+        func: installAutoAcceptConfirm,
+        args: [durationMs],
+      },
+      (results) => {
+        if (chrome.runtime.lastError) {
+          resolve({
+            ok: false,
+            message: chrome.runtime.lastError.message ?? "Unknown scripting error.",
+          });
+          return;
+        }
+
+        const result = results?.[0]?.result as { ok: boolean; reason?: string } | undefined;
+        resolve({
+          ok: Boolean(result?.ok),
+          message: result?.ok
+            ? "Page leave confirm suppressed."
+            : `Page leave confirm was not suppressed. ${result?.reason ?? ""}`,
+        });
+      },
+    );
+  });
+}
+
+// MAIN world 에서 실행된다 — 이 함수 밖의 어떤 것도 참조하면 안 된다.
+function installAutoAcceptConfirm(durationMs: number): { ok: boolean; reason?: string } {
+  try {
+    const pageWindow = window as Window & {
+      __wfOriginalConfirm?: typeof window.confirm;
+      __wfConfirmRestoreTimerId?: number;
+    };
+
+    // 이미 억제 중이면 복원 타이머만 연장한다 (원본은 최초 것을 유지).
+    if (pageWindow.__wfOriginalConfirm === undefined) {
+      pageWindow.__wfOriginalConfirm = window.confirm.bind(window);
+    }
+    if (pageWindow.__wfConfirmRestoreTimerId !== undefined) {
+      window.clearTimeout(pageWindow.__wfConfirmRestoreTimerId);
+    }
+
+    window.confirm = () => true;
+    pageWindow.__wfConfirmRestoreTimerId = window.setTimeout(() => {
+      if (pageWindow.__wfOriginalConfirm !== undefined) {
+        window.confirm = pageWindow.__wfOriginalConfirm;
+        pageWindow.__wfOriginalConfirm = undefined;
+      }
+      pageWindow.__wfConfirmRestoreTimerId = undefined;
+    }, durationMs);
+
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 async function clickPagePreorderDisclosure(tabId: number | undefined): Promise<CommandResponse> {
@@ -2217,6 +2357,110 @@ function triggerSmartStoreChoiceOptionValueFill(value: string): {
     ok: true,
     selector: target.selector,
   };
+}
+
+// 저장하기 버튼을 페이지(MAIN world) 컨텍스트에서 클릭한다. Angular progress-button
+// (vm.submit)은 content script 합성 이벤트를 무시할 수 있어 실제 click() 이 필요하다.
+async function clickPageSaveButton(tabId: number | undefined): Promise<CommandResponse> {
+  if (!tabId) {
+    return {
+      ok: false,
+      message: "Save button target tab was not available.",
+    };
+  }
+
+  return new Promise<CommandResponse>((resolve) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: "MAIN",
+        func: triggerSmartStoreSaveButton,
+      },
+      (results) => {
+        if (chrome.runtime.lastError) {
+          resolve({
+            ok: false,
+            message: chrome.runtime.lastError.message ?? "Unknown scripting error.",
+          });
+          return;
+        }
+
+        const result = results?.[0]?.result as
+          | { ok: boolean; selector?: string; reason?: string }
+          | undefined;
+        resolve({
+          ok: Boolean(result?.ok),
+          message: result?.ok
+            ? `Smart Store save button clicked in page context. selector=${result.selector ?? ""}`
+            : `Smart Store save button was not clicked in page context. ${result?.reason ?? ""}`,
+        });
+      },
+    );
+  });
+}
+
+// MAIN world 에서 실행된다 — 이 함수 밖의 어떤 것도 참조하면 안 된다.
+function triggerSmartStoreSaveButton(): {
+  ok: boolean;
+  selector?: string;
+  reason?: string;
+} {
+  const selectors = [
+    'button[data-nclicks-code="flt.save"][progress-button="vm.submit()"]',
+    'button[data-nclicks-code="flt.save"]',
+    'button[progress-button="vm.submit()"]',
+  ];
+
+  const isVisible = (element: HTMLElement): boolean => {
+    let current: HTMLElement | null = element;
+    while (current) {
+      const style = window.getComputedStyle(current);
+      if (
+        current.hidden ||
+        current.getAttribute("aria-hidden") === "true" ||
+        style.display === "none" ||
+        style.visibility === "hidden"
+      ) {
+        return false;
+      }
+      current = current.parentElement;
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+
+  const candidates = selectors.flatMap((selector) =>
+    Array.from(document.querySelectorAll(selector)).map((candidate) => ({
+      selector,
+      candidate,
+    })),
+  );
+  // 셀렉터로 못 찾으면 화면의 '저장하기' 텍스트 버튼을 마지막으로 시도한다.
+  if (candidates.length === 0) {
+    for (const button of Array.from(document.querySelectorAll("button"))) {
+      const text = button.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      if (text === "저장하기" || text === "저장") {
+        candidates.push({ selector: "button:text(저장하기)", candidate: button });
+      }
+    }
+  }
+
+  const target = candidates.find(
+    (entry): entry is { selector: string; candidate: HTMLElement } =>
+      entry.candidate instanceof HTMLElement &&
+      isVisible(entry.candidate) &&
+      !(entry.candidate as HTMLButtonElement).disabled &&
+      entry.candidate.getAttribute("aria-disabled") !== "true" &&
+      !entry.candidate.classList.contains("disabled"),
+  );
+
+  if (!target) {
+    return { ok: false, reason: "No enabled save button was found." };
+  }
+
+  target.candidate.scrollIntoView({ block: "center" });
+  target.candidate.click();
+  return { ok: true, selector: target.selector };
 }
 
 async function clickPageOptionListApply(tabId: number | undefined): Promise<CommandResponse> {

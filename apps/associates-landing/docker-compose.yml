@@ -1,0 +1,7 @@
+services:
+  hobby-atlas:
+    build: .
+    image: hobby-atlas:latest
+    ports:
+      - "8088:80"
+    restart: unless-stopped
