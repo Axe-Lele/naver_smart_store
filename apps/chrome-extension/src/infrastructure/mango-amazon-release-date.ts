@@ -47,6 +47,67 @@ const ENGLISH_MONTH_NUMBERS: Record<string, number> = {
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
 
+// "이 상품을 본 고객이 함께 본 상품"/스폰서 캐러셀에는 완전히 다른 상품의
+// 예약 배너("This item will be released on ...")가 그대로 들어있어, 키워드
+// 검색이 페이지 전체를 훑으면 그 다른 상품의 발매일을 우리 상품 것으로 잘못
+// 읽어온다. 이런 위젯은 항상 우리 상품 자체의 예약 배너/등록정보보다 뒤에
+// 나오므로, 위젯이 시작되는 지점 앞부분만 검색 대상으로 삼는다. 마커를 하나도
+// 못 찾으면 안전하게 페이지 전체를 그대로 쓴다(과거와 동일하게 동작).
+const OTHER_PRODUCTS_SECTION_MARKERS = [
+  "customers also viewed these products",
+  "customers who viewed this item also viewed",
+  "products related to this item",
+  "compare with similar items",
+  "frequently bought together",
+  "customers also bought",
+  "この商品を見た後に買っているのは",
+  "よく一緒に購入されている商品",
+  "この商品に関連する商品",
+  "この商品をチェックした人はこんな商品もチェックしています",
+  "スポンサープロダクト",
+] as const;
+
+function truncateBeforeOtherProductsWidgets(text: string, lowerText: string): string {
+  let cutoff = text.length;
+  for (const marker of OTHER_PRODUCTS_SECTION_MARKERS) {
+    const index = lowerText.indexOf(marker.toLowerCase());
+    if (index !== -1 && index < cutoff) {
+      cutoff = index;
+    }
+  }
+  return text.slice(0, cutoff);
+}
+
+// <div id="ppd"> 는 아마존 상품 상세 페이지 본문(제목/이미지/구매박스/가격/특징/
+// 등록정보)을 담는 컨테이너다. "Customers also viewed"/"Products related to
+// this item" 같은 다른 상품 캐러셀은 이 밖(형제 요소)에 렌더링되므로, 원본 HTML
+// 단계에서 이 안쪽만 잘라내면 다른 상품의 발매일 문구가 애초에 검색 대상에도
+// 들어오지 않는다. div 중첩 깊이를 세어 짝이 맞는 닫는 태그까지 잘라낸다.
+// #ppd 를 못 찾으면(레이아웃이 다르거나 못 찾을 경우) null 을 돌려주고, 호출부는
+// 페이지 전체 텍스트로 안전하게 되돌아간다.
+function extractPpdSection(html: string): string | null {
+  const startMatch = /<div[^>]*\sid=["']ppd["'][^>]*>/i.exec(html);
+  if (!startMatch) {
+    return null;
+  }
+
+  const tagPattern = /<div\b|<\/div\s*>/gi;
+  tagPattern.lastIndex = startMatch.index + startMatch[0].length;
+  let depth = 1;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(html))) {
+    if (match[0].toLowerCase().startsWith("</div")) {
+      depth -= 1;
+      if (depth === 0) {
+        return html.slice(startMatch.index, match.index + match[0].length);
+      }
+    } else {
+      depth += 1;
+    }
+  }
+  return html.slice(startMatch.index);
+}
+
 export async function fetchOriginReleaseDates(
   items: OriginReleaseDateItem[],
 ): Promise<OriginReleaseDateResult[]> {
@@ -104,7 +165,8 @@ export function isAmazonJapanUrl(url: string): boolean {
 }
 
 export function parseAmazonReleaseDate(html: string): string | null {
-  const text = htmlToText(html);
+  const fullText = htmlToText(extractPpdSection(html) ?? html);
+  const text = truncateBeforeOtherProductsWidgets(fullText, fullText.toLowerCase());
   // 영어 키워드를 대소문자 무시로 찾기 위한 소문자 사본. toLowerCase 는 이 텍스트
   // 범위에서 길이를 바꾸지 않으므로 원본과 인덱스가 일치한다.
   const lowerText = text.toLowerCase();

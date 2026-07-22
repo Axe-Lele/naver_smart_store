@@ -62,6 +62,41 @@ describe("parseAmazonReleaseDate", () => {
     const html = `<script>var releaseNote = "発売日 2020/1/1";</script><div>本文</div>`;
     expect(parseAmazonReleaseDate(html)).toBeNull();
   });
+
+  it("이미 발매되어 예약 배너가 없는 상품은, 아래쪽 캐러셀에 있는 '다른 상품'의 예약 배너를 발매일로 읽지 않는다", () => {
+    const html =
+      `<div id="ppd"><span>Only 1 left in stock - order soon.</span>` +
+      `<span>Add to cart</span><span>Buy Now</span></div>` +
+      `<div id="similarities"><h2>Customers also viewed these products</h2>` +
+      `<span>Gift+ Series "Crash: Honkai Star Rail," 1/8 Scale</span>` +
+      `<span>This item will be released on September 30, 2026.</span></div>` +
+      `<div id="detailBullets"><span>ASIN</span><span>B0F82SSLJ6</span></div>`;
+    expect(parseAmazonReleaseDate(html)).toBeNull();
+  });
+
+  it("우리 상품 자체의 예약 배너는 캐러셀 마커보다 앞에 있으면 그대로 읽는다", () => {
+    const html =
+      `<div id="ppd"><span>This item will be released on January 31, 2027.</span></div>` +
+      `<div id="similarities"><h2>Customers also viewed these products</h2>` +
+      `<span>This item will be released on September 30, 2026.</span></div>`;
+    expect(parseAmazonReleaseDate(html)).toBe("2027-01-31");
+  });
+
+  it("#ppd 바깥의 캐러셀은 '다른 상품' 마커 문구가 없어도 애초에 검색 대상에서 제외된다", () => {
+    const html =
+      `<div id="ppd"><div id="centerCol"><span>Only 1 left in stock - order soon.</span></div></div>` +
+      `<div id="similarities_feature_div"><span>This item will be released on September 30, 2026.</span></div>`;
+    expect(parseAmazonReleaseDate(html)).toBeNull();
+  });
+
+  it("#ppd 안의 발매일은 안쪽에 다른 div 들이 중첩돼 있어도 정상적으로 읽는다", () => {
+    const html =
+      `<div id="ppd"><div id="rightCol"><div id="buybox"><span>` +
+      `This item will be released on January 31, 2027.` +
+      `</span></div></div></div>` +
+      `<div id="similarities_feature_div"><span>This item will be released on September 30, 2026.</span></div>`;
+    expect(parseAmazonReleaseDate(html)).toBe("2027-01-31");
+  });
 });
 
 describe("isAmazonJapanUrl", () => {
