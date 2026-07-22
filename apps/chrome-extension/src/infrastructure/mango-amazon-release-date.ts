@@ -76,7 +76,14 @@ async function fetchSingleReleaseDate(url: string): Promise<string | null> {
   try {
     // credentials: "include" — 운영자 브라우저가 평소 아마존을 보던 세션 그대로
     // 요청한다(별도 로그인/우회 없음). 쿠키가 없어도 공개 상품 페이지는 열린다.
-    const response = await fetch(url, { credentials: "include", signal: controller.signal });
+    // cache: "no-store" — 브라우저 HTTP 캐시에 남아있는 예전 페이지 스냅샷을 그대로
+    // 돌려받으면, 그때는 예약(발매예정)이었지만 지금은 이미 발매된 상품의 발매일이
+    // 여전히 과거의 미래 날짜로 보이는 문제가 생긴다. 항상 최신 페이지를 받는다.
+    const response = await fetch(url, {
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal,
+    });
     if (!response.ok) {
       return null;
     }
