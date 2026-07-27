@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/pre-bash-safety.cjs"
+            "command": "node \"C:\\Users\\Master\\Documents\\Project\\smart-store\\.codex\\hooks\\pre-bash-safety.cjs\""
           }
         ]
       },
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/pre-read-sensitive.cjs"
+            "command": "node \"C:\\Users\\Master\\Documents\\Project\\smart-store\\.codex\\hooks\\pre-read-sensitive.cjs\""
           }
         ]
       },
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/pre-edit-config-guard.cjs"
+            "command": "node \"C:\\Users\\Master\\Documents\\Project\\smart-store\\.codex\\hooks\\pre-edit-config-guard.cjs\""
           }
         ]
       }
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .codex/hooks/stop-smart-store-review.cjs"
+            "command": "node \"C:\\Users\\Master\\Documents\\Project\\smart-store\\.codex\\hooks\\stop-smart-store-review.cjs\""
           }
         ]
       }
